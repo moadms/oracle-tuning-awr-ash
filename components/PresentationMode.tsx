@@ -14,20 +14,30 @@ import {
   CheckCircle2, 
   Layers, 
   ArrowRight,
-  Maximize2
+  Maximize2,
+  BookOpen,
+  Sparkles,
+  X
 } from 'lucide-react';
 import { PRESENTATION_SLIDES } from '@/lib/oracleData';
 import { sounds } from '@/lib/sounds';
 
 interface PresentationModeProps {
   onGoToLiveTP?: () => void;
+  onGoTo3D?: () => void;
+  onGoToReports?: () => void;
 }
 
-export default function PresentationMode({ onGoToLiveTP }: PresentationModeProps) {
+export default function PresentationMode({ 
+  onGoToLiveTP,
+  onGoTo3D,
+  onGoToReports
+}: PresentationModeProps) {
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [secondsRemaining, setSecondsRemaining] = useState(600); // 10 minutes = 600 seconds
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [showSpeakerPrompter, setShowSpeakerPrompter] = useState(true);
+  const [showFullPlanModal, setShowFullPlanModal] = useState(false);
 
   const currentSlide = PRESENTATION_SLIDES[currentSlideIndex];
 
@@ -101,8 +111,19 @@ export default function PresentationMode({ onGoToLiveTP }: PresentationModeProps
           ))}
         </div>
 
-        {/* 10-Minute Chrono Controller */}
+        {/* 10-Minute Chrono Controller & Script Button */}
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              setShowFullPlanModal(true);
+              sounds.playClick();
+            }}
+            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-lg shadow-purple-500/25 flex items-center gap-1.5 transition"
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Script &amp; Plan d&apos;Attaque</span>
+          </button>
+
           <div className={`px-4 py-1.5 rounded-xl border font-mono font-bold text-sm sm:text-base flex items-center gap-2 shadow-inner ${timerColor}`}>
             <Clock className="w-4 h-4" />
             <span>{formatTimer(secondsRemaining)}</span>
@@ -143,7 +164,7 @@ export default function PresentationMode({ onGoToLiveTP }: PresentationModeProps
               }`}
             >
               <Mic className="w-3.5 h-3.5" />
-              Prompteur Orateur
+              Prompteur
             </button>
           </div>
         </div>
@@ -238,26 +259,38 @@ export default function PresentationMode({ onGoToLiveTP }: PresentationModeProps
               </div>
             </div>
 
-            {/* Special CTA for Slide 5 (TP) */}
-            {currentSlide.id === 5 && onGoToLiveTP && (
-              <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-950/60 to-cyan-950/60 border border-emerald-500/40 flex items-center justify-between gap-4">
-                <div>
-                  <h4 className="text-sm font-bold text-emerald-300">
-                    Prêt pour la Démo devant le Professeur ?
-                  </h4>
-                  <p className="text-xs text-slate-300 mt-0.5">
-                    Ouvrez le simulateur SQL*Plus et générez le rapport AWR/ASH en temps réel !
-                  </p>
-                </div>
+            {/* Fast Action Buttons Based on Slide */}
+            <div className="flex flex-wrap gap-3 pt-2">
+              {currentSlide.id === 1 && onGoTo3D && (
+                <button
+                  onClick={onGoTo3D}
+                  className="px-4 py-2.5 rounded-xl bg-cyan-500/15 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-500/25 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+                >
+                  <Sparkles className="w-4 h-4 text-cyan-400" />
+                  <span>Montrer l&apos;Architecture 3D &amp; les Flèches</span>
+                </button>
+              )}
+
+              {(currentSlide.id === 2 || currentSlide.id === 3) && onGoToReports && (
+                <button
+                  onClick={onGoToReports}
+                  className="px-4 py-2.5 rounded-xl bg-pink-500/15 text-pink-300 border border-pink-500/40 hover:bg-pink-500/25 text-xs font-bold transition flex items-center gap-2 shadow-sm"
+                >
+                  <Layers className="w-4 h-4 text-pink-400" />
+                  <span>Ouvrir les Rapports Réels AWR / ASH</span>
+                </button>
+              )}
+
+              {currentSlide.id === 5 && onGoToLiveTP && (
                 <button
                   onClick={onGoToLiveTP}
-                  className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg transition flex items-center gap-1.5 whitespace-nowrap"
+                  className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-emerald-500/20"
                 >
-                  <span>Lancer le TP Live</span>
+                  <span>Lancer la Démo TP Live SQL*Plus</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {/* Right Column: Visual Diagram & Pro Callout (5 cols) */}
@@ -373,7 +406,7 @@ export default function PresentationMode({ onGoToLiveTP }: PresentationModeProps
           </div>
         </div>
 
-        {/* Speaker Prompter Drawer (Ce qu'il faut dire au prof mot pour mot) */}
+        {/* Speaker Prompter Drawer */}
         {showSpeakerPrompter && (
           <div className="mt-8 p-5 rounded-2xl bg-cyan-950/40 border border-cyan-800/60 shadow-xl">
             <div className="flex items-center justify-between mb-2">
@@ -391,6 +424,95 @@ export default function PresentationMode({ onGoToLiveTP }: PresentationModeProps
           </div>
         )}
       </div>
+
+      {/* Full Presentation Plan Modal (Le Guide Pas-à-Pas pour Démarrer) */}
+      {showFullPlanModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="relative w-full max-w-4xl max-h-[90vh] bg-slate-950 border border-slate-800 rounded-2xl p-6 overflow-y-auto shadow-2xl flex flex-col gap-6">
+            <div className="flex items-start justify-between pb-4 border-b border-slate-800">
+              <div>
+                <span className="text-xs font-mono text-cyan-400 font-bold uppercase tracking-wider block mb-1">
+                  Guide Stratégique de Soutenance (10 Minutes)
+                </span>
+                <h3 className="text-xl font-extrabold text-white">
+                  Où commencer &amp; Comment dérouler votre présentation pas à pas
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowFullPlanModal(false)}
+                className="p-2 rounded-xl bg-slate-900 text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Step-by-Step Script Walkthrough */}
+            <div className="space-y-4 text-xs sm:text-sm text-slate-300 leading-relaxed">
+              {/* Etape 0 : L'Accroche */}
+              <div className="p-4 rounded-xl bg-purple-950/30 border border-purple-800/50">
+                <h4 className="font-bold text-purple-300 text-base mb-1">
+                  🎯 Étape 0 : L&apos;Accroche Choc (Minute 00:00 - 00:30)
+                </h4>
+                <p className="italic text-slate-200">
+                  « Monsieur le Professeur, mes chers collègues. Imaginez qu&apos;un vendredi de pointe e-commerce, votre base de données Oracle gèle pendant 45 secondes. L&apos;AWR généré sur l&apos;heure affiche une charge moyenne normale de 0.8 sessions : il est complètement aveugle. Pourquoi ? Parce que le pic est dilué sur 3600 secondes ! C&apos;est exactement pour résoudre ce paradoxe que le Diagnostic Pack d&apos;Oracle combine deux outils complémentaires : <strong>AWR</strong>, la boîte noire macroscopique, et <strong>ASH</strong>, le microscope temporel à la seconde. »
+                </p>
+              </div>
+
+              {/* Etape 1 : Architecture 3D */}
+              <div className="p-4 rounded-xl bg-cyan-950/30 border border-cyan-800/50">
+                <h4 className="font-bold text-cyan-300 text-base mb-1">
+                  🧊 Étape 1 : Passer sur l&apos;Architecture 3D &amp; Montrer les Flèches (Minute 00:30 - 02:30)
+                </h4>
+                <p>
+                  <strong>Action :</strong> Cliquez sur le menu de gauche <em>« Architecture 3D &amp; Flux »</em>.<br />
+                  <strong>Ce que vous dites :</strong> « Tout commence dans la System Global Area (SGA). Regardez ce flux en 3D avec les flèches : quand une session envoie une requête, elle traverse d&apos;abord la Shared Pool pour le plan d&apos;exécution, puis le Buffer Cache. Si le bloc n&apos;est pas en mémoire, elle attend une I/O disque physique : c&apos;est le <em>db file sequential read</em>. Et regardez nos deux processus vedettes : en haut à gauche, <strong>MMON</strong> prend une photo horaire vers <strong>SYSAUX</strong> (AWR), tandis que <strong>MMNL</strong> échantillonne le tampon circulaire rose chaque seconde (ASH). »
+                </p>
+              </div>
+
+              {/* Etape 2 : AWR & ASH Réels */}
+              <div className="p-4 rounded-xl bg-blue-950/30 border border-blue-800/50">
+                <h4 className="font-bold text-blue-300 text-base mb-1">
+                  📄 Étape 2 : Analyser le Rapport AWR &amp; Révéler le Pic avec ASH (Minute 02:30 - 06:30)
+                </h4>
+                <p>
+                  <strong>Action :</strong> Cliquez sur <em>« Rapports AWR &amp; ASH »</em>.<br />
+                  <strong>Ce que vous dites :</strong> « Dans l&apos;AWR, nous regardons 3 sections sacrées : le Load Profile (fréquence des transactions), les pourcentages d&apos;efficacité (Execute to Parse, Buffer Hit %), et le tableau des <em>Top 10 Foreground Events</em>. Mais quand nous basculons sur le rapport ASH, regardez ce graphique : le pic de 68 sessions actives apparaît instantanément, et ASH pointe la session bloquante avec son numéro précis : <code>BLOCKING_SESSION = 142</code> ! »
+                </p>
+              </div>
+
+              {/* Etape 3 : Démo Live TP */}
+              <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-800/50">
+                <h4 className="font-bold text-emerald-300 text-base mb-1">
+                  💻 Étape 3 : Le TP Live SQL*Plus en Direct devant le Professeur (Minute 06:30 - 08:30)
+                </h4>
+                <p>
+                  <strong>Action :</strong> Cliquez sur <em>« TP Live SQL*Plus »</em>.<br />
+                  <strong>Ce que vous dites :</strong> « Pour vous prouver que ce n&apos;est pas de la théorie, générons maintenant ces rapports ensemble en SQL*Plus. Étape 1 : vérification de <code>STATISTICS_LEVEL</code> (TYPICAL). Étape 2 : déclenchement du snapshot manuel avec <code>DBMS_WORKLOAD_REPOSITORY.CREATE_SNAPSHOT()</code>. Étape 3 : exécution d&apos;<code>awrrpt.sql</code> et d&apos;<code>ashrpt.sql</code>. En direct, le fichier HTML est écrit sur disque et prêt pour notre diagnostic ! »
+                </p>
+              </div>
+
+              {/* Etape 4 : Windows & Conclusion */}
+              <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-800/50">
+                <h4 className="font-bold text-amber-300 text-base mb-1">
+                  🪟 Étape 4 : Oracle sous Windows &amp; Conclusion Impressionnante (Minute 08:30 - 10:00)
+                </h4>
+                <p>
+                  <strong>Ce que vous dites :</strong> « Enfin, une spécificité souvent méconnue : sous Windows, Oracle ne fonctionne pas comme sous Linux. Tous les processus d&apos;arrière-plan ne sont pas des processus séparés, mais des <strong>threads natifs internes</strong> au sein de l&apos;unique exécutable <code>oracle.exe</code>. En combinant l&apos;Alert Log dans l&apos;ADR et les rapports AWR/ASH, le DBA dispose d&apos;une visibilité chirurgicale totale sur la santé de son système. Merci pour votre attention, nous sommes à votre disposition pour vos questions ! »
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button
+                onClick={() => setShowFullPlanModal(false)}
+                className="px-5 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition"
+              >
+                Compris, Fermer le Guide
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
