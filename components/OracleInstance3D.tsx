@@ -19,13 +19,16 @@ import {
   Eye,
   CheckCircle2,
   AlertTriangle,
-  Zap
+  Zap,
+  Grid,
+  FileText
 } from 'lucide-react';
 import { sounds } from '@/lib/sounds';
 
 interface ComponentDetail {
   id: string;
   name: string;
+  tag: string;
   category: 'Mémoire SGA' | 'Processus' | 'Stockage Disque';
   role: string;
   awrAshRole: string;
@@ -39,19 +42,21 @@ const DETAILS_MAP: Record<string, ComponentDetail> = {
   session_client: {
     id: 'session_client',
     name: 'Session Utilisateur & PGA',
+    tag: 'Clients & Processus Serveur',
     category: 'Processus',
-    role: 'Représente les applications clientes connectées (JDBC, SQL*Plus, ERP) et la mémoire privée PGA.',
-    awrAshRole: 'Génère le DB Time. Lorsque la session attend une ressource, son état est capturé par ASH et cumulé dans AWR.',
+    role: 'Applications connectées (JDBC, ERP, SQL*Plus) et mémoire privée dédiée PGA (tris, hash joins).',
+    awrAshRole: 'Origine du DB Time ! Lorsqu\'une session attend une ressource, son état est capturé par ASH chaque seconde et agrégé par AWR.',
     views: ['V$SESSION', 'V$PROCESS', 'V$SESSTAT'],
-    tuningTip: 'Surveillez le ratio DB Time / Elapsed Time (Average Active Sessions AAS).',
+    tuningTip: 'Surveillez le ratio DB Time / Elapsed Time (Average Active Sessions AAS). Si AAS > nb CPUs, surcharge !',
     color: '#a855f7',
-    position: [-10, 3, 10]
+    position: [-11, 3, 10]
   },
   buffer_cache: {
     id: 'buffer_cache',
     name: 'Database Buffer Cache',
+    tag: 'Cache des Blocs de Données',
     category: 'Mémoire SGA',
-    role: 'Conserve en mémoire vive les copies des blocs de données lus depuis les Datafiles physiques.',
+    role: 'Conserve en mémoire vive les copies des blocs de données (8 Ko) lus depuis les Datafiles physiques.',
     awrAshRole: 'Analysé dans AWR via "Buffer Pool Advisory" et "Instance Efficiency". Si un bloc n\'y est pas, déclenche "db file sequential read" ou "db file scattered read".',
     views: ['V$BH', 'V$BUFFER_POOL', 'V$DB_CACHE_ADVICE', 'DBA_HIST_DB_CACHE_ADVICE'],
     tuningTip: 'Ajustez DB_CACHE_SIZE si l\'Advisory AWR indique un gain substantiel de réduction des lectures physiques.',
@@ -60,9 +65,10 @@ const DETAILS_MAP: Record<string, ComponentDetail> = {
   },
   shared_pool: {
     id: 'shared_pool',
-    name: 'Shared Pool (Library Cache & Dict Cache)',
+    name: 'Shared Pool',
+    tag: 'Library Cache & Dictionnaire',
     category: 'Mémoire SGA',
-    role: 'Stocke les plans d\'exécution SQL compilés, les triggers PL/SQL et les métadonnées du dictionnaire.',
+    role: 'Stocke les plans d\'exécution SQL compilés, les curseurs partagés et les métadonnées du dictionnaire de données.',
     awrAshRole: 'Contention visible dans AWR via "latch: shared pool" et "latch: library cache" lors d\'un Hard Parsing storm. Visible dans ASH par des sessions bloquées au parse.',
     views: ['V$SQL', 'V$LIBRARYCACHE', 'V$SHARED_POOL_ADVICE', 'DBA_HIST_SQLSTAT'],
     tuningTip: 'Utilisez impérativement des Bind Variables (:id) pour mutualiser les curseurs et soulager le CPU.',
@@ -71,9 +77,10 @@ const DETAILS_MAP: Record<string, ComponentDetail> = {
   },
   ash_buffer: {
     id: 'ash_buffer',
-    name: 'Tampon Circulaire ASH (1s Sampling)',
+    name: 'Tampon Circulaire ASH',
+    tag: 'Échantillonnage 1s en Mémoire',
     category: 'Mémoire SGA',
-    role: 'Zone mémoire circulaire dans la SGA réservée à l\'Active Session History (~2 Mo par CPU).',
+    role: 'Zone mémoire circulaire dans la SGA réservée à l\'Active Session History (~2 Mo par processeur CPU).',
     awrAshRole: 'Échantillonne CHAQUE SECONDE 100% des sessions actives (WAITING ou CPU). Permet d\'analyser les micro-pics de 15 à 60 secondes sans toucher aux disques.',
     views: ['V$ACTIVE_SESSION_HISTORY', 'V$ASH_INFO'],
     tuningTip: 'Accessible directement sans aucun impact I/O. Quand le tampon est plein, les données anciennes sont transférées par MMNL vers SYSAUX.',
@@ -83,79 +90,86 @@ const DETAILS_MAP: Record<string, ComponentDetail> = {
   redo_buffer: {
     id: 'redo_buffer',
     name: 'Redo Log Buffer',
+    tag: 'Journalisation des Transactions',
     category: 'Mémoire SGA',
     role: 'Tampon circulaire en mémoire enregistrant toutes les modifications (vecteurs de redo) apportées à la base.',
     awrAshRole: 'Goulot d\'étranglement visible dans AWR par "log buffer space" ou "log file sync" lors des COMMITs.',
     views: ['V$LOG', 'V$LOG_HISTORY', 'DBA_HIST_SYSSTAT'],
-    tuningTip: 'Évitez les COMMIT dans des boucles PL/SQL pour ne pas saturer LGWR.',
+    tuningTip: 'Évitez les COMMIT dans des boucles PL/SQL pour ne pas saturer le processus LGWR.',
     color: '#f97316',
-    position: [0, 0.8, -5]
+    position: [0, 0.8, -5.5]
   },
   mmon: {
     id: 'mmon',
-    name: 'Processus MMON (Manageability Monitor)',
+    name: 'Processus MMON',
+    tag: 'Générateur AWR (60 min)',
     category: 'Processus',
-    role: 'Collecte les métriques de la SGA et déclenche la capture périodique des snapshots AWR.',
+    role: 'Processus d\'arrière-plan Oracle chargé de collecter les statistiques de la SGA et de déclencher les clichés AWR.',
     awrAshRole: 'Toutes les 60 minutes, MMON réveille un worker esclave (m000) pour écrire le Snapshot AWR dans le tablespace SYSAUX.',
     views: ['DBA_HIST_SNAPSHOT', 'DBA_HIST_WR_CONTROL', 'V$PROCESS'],
     tuningTip: 'Configurez la fréquence et la rétention avec DBMS_WORKLOAD_REPOSITORY.MODIFY_SNAPSHOT_SETTINGS.',
     color: '#10b981',
-    position: [-8, 7, 3]
+    position: [-8, 7.5, 3]
   },
   mmnl: {
     id: 'mmnl',
-    name: 'Processus MMNL (Manageability Monitor Light)',
+    name: 'Processus MMNL',
+    tag: 'Vidage ASH vers SYSAUX (1/10e)',
     category: 'Processus',
-    role: 'Processus d\'arrière-plan allégé dédié au transfert régulier des données ASH vers le disque.',
-    awrAshRole: 'Quand le tampon ASH est plein ou qu\'une heure s\'est écoulée, MMNL décharge 1 échantillon sur 10 dans DBA_HIST_ACTIVE_SESS_HISTORY.',
+    role: 'Processus d\'arrière-plan allégé dédié au transfert régulier des données d\'historique des sessions actives vers le disque.',
+    awrAshRole: 'Quand le tampon ASH est plein ou après 1h, MMNL décharge 1 échantillon sur 10 dans DBA_HIST_ACTIVE_SESS_HISTORY.',
     views: ['DBA_HIST_ACTIVE_SESS_HISTORY', 'V$ACTIVE_SESSION_HISTORY'],
     tuningTip: 'Le ratio de 1/10 économise 90% d\'espace disque tout en conservant une validité statistique.',
     color: '#eab308',
-    position: [-2, 7, 6]
+    position: [-2, 7.5, 6]
   },
   lgwr: {
     id: 'lgwr',
-    name: 'Processus LGWR (Log Writer)',
+    name: 'Processus LGWR',
+    tag: 'Log Writer (COMMIT)',
     category: 'Processus',
     role: 'Écrit les données du Redo Log Buffer de la SGA vers les fichiers Redo Logs physiques lors des COMMITs.',
     awrAshRole: 'Si LGWR est lent ou sollicité en boucle, les sessions clientes attendent sur "log file sync" dans l\'AWR et l\'ASH.',
     views: ['V$SYSTEM_EVENT', 'DBA_HIST_SYSTEM_EVENT'],
     tuningTip: 'Regroupez les commits par lots (Bulk Collect / FORALL). Placez les Redo Logs sur stockage SSD ultra-rapide.',
     color: '#f43f5e',
-    position: [8, 7, 2]
+    position: [8, 7.5, 2]
   },
   sysaux: {
     id: 'sysaux',
-    name: 'Tablespace SYSAUX (Référentiel AWR)',
+    name: 'Tablespace SYSAUX',
+    tag: 'Référentiel Disque AWR & ASH',
     category: 'Stockage Disque',
     role: 'Tablespace système auxiliaire obligatoire hébergeant les tables WRH$* et les vues DBA_HIST_*.',
     awrAshRole: 'Stocke les snapshots AWR sur 8 jours et l\'historique ASH déchargé par MMNL.',
     views: ['V$SYSAUX_OCCUPANTS', 'DBA_HIST_SNAPSHOT', 'DBA_DATA_FILES'],
     tuningTip: 'Vérifiez la taille du schéma AWR avec V$SYSAUX_OCCUPANTS WHERE OCCUPANT_NAME = \'SM/AWR\'.',
     color: '#3b82f6',
-    position: [0, -3.5, 7]
+    position: [0, -4, 7]
   },
   datafiles: {
     id: 'datafiles',
-    name: 'Datafiles Physiques (Disque .dbf)',
+    name: 'Datafiles (.dbf)',
+    tag: 'Fichiers Physiques de Données',
     category: 'Stockage Disque',
     role: 'Fichiers physiques de données hébergeant les tables et les index sur le disque dur ou SAN/NAS.',
-    awrAshRole: 'Les lectures disques physiques génèrent "db file sequential read" (index lookup) ou "db file scattered read" (full table scan).',
+    awrAshRole: 'Les lectures physiques génèrent "db file sequential read" (index lookup) ou "db file scattered read" (full table scan).',
     views: ['V$DATAFILE', 'DBA_DATA_FILES', 'V$FILESTAT'],
     tuningTip: 'Utilisez des index appropriés pour éviter les lectures disques superflues.',
     color: '#0284c7',
-    position: [-7, -3.5, 0]
+    position: [-7.5, -4, 0]
   },
   redofiles: {
     id: 'redofiles',
-    name: 'Redo Log Files (Disque .log)',
+    name: 'Redo Log Files (.log)',
+    tag: 'Fichiers Journal de Redo',
     category: 'Stockage Disque',
     role: 'Fichiers disques journalisant toutes les transactions pour garantir la durabilité (ACID).',
     awrAshRole: 'Écritures suivies via "log file parallel write" (LGWR) et "log file sync" (session utilisateur).',
     views: ['V$LOGFILE', 'V$LOG'],
     tuningTip: 'I/O critiques : toujours dédier les disques les plus rapides aux Redo Logs.',
     color: '#e11d48',
-    position: [7, -3.5, -4]
+    position: [7.5, -4, -3.5]
   }
 };
 
@@ -178,106 +192,106 @@ export interface FlowScenario {
 const FLOW_SCENARIOS: FlowScenario[] = [
   {
     id: 'query_execution',
-    title: '1. Requête SQL & Cache Hit/Miss',
-    badge: 'Cycle de Requête',
-    description: 'Déroulement complet de l\'exécution d\'un SELECT : de la session cliente au Buffer Cache et à l\'I/O disque en cas de Cache Miss.',
+    title: '1. Requête SQL & Cache Hit / Miss',
+    badge: 'Requête & I/O',
+    description: 'Déroulement de l\'exécution d\'un SELECT : de la session au Buffer Cache et à l\'I/O disque en cas de Cache Miss.',
     steps: [
       {
         stepNum: 1,
-        title: 'Envoi du SELECT par la Session Cliente',
+        title: 'Session Cliente -> Shared Pool (Compilation SQL)',
         from: 'session_client',
         to: 'shared_pool',
-        actionText: 'La session cliente transmet le texte SQL au processus serveur dans la PGA.',
-        technicalDetails: 'Vérification syntaxique et sémantique dans la Shared Pool (Library Cache). Si la requête a déjà été exécutée avec des variables liées, le plan compilé est immédiatement réutilisé (Soft Parse). Sinon, compilation complète coûteuse en CPU (Hard Parse).'
+        actionText: 'La session transmet la requête SQL. Le CBO vérifie le plan compilé dans la Shared Pool.',
+        technicalDetails: 'Si présent : Soft Parse immédiat. Si absent (ex: pas de bind variables) : Hard Parse coûteux en CPU avec contention sur "latch: shared pool".'
       },
       {
         stepNum: 2,
-        title: 'Recherche des Blocs dans le Buffer Cache',
+        title: 'Shared Pool -> Buffer Cache (Recherche en Mémoire)',
         from: 'shared_pool',
         to: 'buffer_cache',
         actionText: 'Le processus serveur consulte la table de hachage du Database Buffer Cache dans la SGA.',
-        technicalDetails: 'Si le bloc de données recherché est déjà présent en mémoire : Cache Hit ! Lecture logique ultra-rapide (Logical Read) sans toucher au disque.'
+        technicalDetails: 'Si le bloc est trouvé en mémoire vive : Cache Hit ! Lecture logique ultra-rapide (Logical Read) sans aucun accès disque.'
       },
       {
         stepNum: 3,
-        title: 'Cache Miss : Lecture Physique sur les Datafiles',
+        title: 'Buffer Cache -> Datafiles (Cache Miss & I/O Disque)',
         from: 'buffer_cache',
         to: 'datafiles',
-        actionText: 'Le bloc n\'est pas en mémoire : Oracle émet une lecture synchrone sur les fichiers physiques.',
-        technicalDetails: 'La session se met en état d\'attente instrumenté ! Si c\'est un accès par index, l\'évènement est "db file sequential read" (mono-bloc). Si c\'est un Full Table Scan, c\'est "db file scattered read" (multi-blocs).',
+        actionText: 'Le bloc n\'est pas en cache : lecture physique sur les Datafiles du disque.',
+        technicalDetails: 'La session entre en état d\'attente (Wait Event) : "db file sequential read" (index mono-bloc) ou "db file scattered read" (Full Table Scan multi-blocs).',
         waitEvent: 'db file sequential / scattered read'
       },
       {
         stepNum: 4,
-        title: 'Chargement en SGA & Retour des Données',
+        title: 'Datafiles -> Buffer Cache -> Session (Chargement)',
         from: 'datafiles',
         to: 'session_client',
-        actionText: 'Le bloc est placé dans la liste LRU du Buffer Cache et les lignes sont retournées au client.',
-        technicalDetails: 'La session sort de son état de Wait Event. Le temps total d\'attente est comptabilisé dans le DB Time de l\'AWR.'
+        actionText: 'Le bloc est chargé en mémoire SGA et les lignes sont retournées au client.',
+        technicalDetails: 'La session sort du Wait Event. Le temps d\'attente est comptabilisé dans le DB Time de l\'AWR.'
       }
     ]
   },
   {
     id: 'ash_sampling',
     title: '2. Échantillonnage ASH Haute Fréquence (1s)',
-    badge: 'Microscope Temporel',
-    description: 'Comment ASH capture l\'état de chaque session active chaque seconde en mémoire vive sans ralentir la base, puis décharge vers le disque.',
+    badge: 'Microscope ASH',
+    description: 'Comment ASH capture chaque seconde l\'état des sessions actives en mémoire vive sans impact CPU, puis décharge vers SYSAUX.',
     steps: [
       {
         stepNum: 1,
-        title: 'Capture 1s des Sessions Actives en SGA',
+        title: 'Session Active -> Tampon Circulaire ASH (1 Seconde)',
         from: 'session_client',
         to: 'ash_buffer',
         actionText: 'Chaque 1 seconde, ASH photographie toutes les sessions actives (sur CPU ou en attente).',
-        technicalDetails: 'ASH lit la mémoire SGA sans poser de verrous lourds (latch-free traversal). Les sessions inactives (attente client) sont ignorées. Overhead CPU inférieur à 1% !'
+        technicalDetails: 'Parcours en mémoire vive sans verrous lourds (latch-free read). Overhead CPU inférieur à 1% ! Les sessions inactives sont ignorées.'
       },
       {
         stepNum: 2,
-        title: 'Enregistrement dans le Tampon Circulaire (V$)',
+        title: 'Enregistrement dans V$ACTIVE_SESSION_HISTORY',
         from: 'ash_buffer',
         to: 'ash_buffer',
-        actionText: 'L\'échantillon est inscrit dans le tampon circulaire SGA : V$ACTIVE_SESSION_HISTORY.',
-        technicalDetails: 'Le tampon alloue ~2 Mo par processeur CPU. Chaque ligne contient le SID, le SQL_ID en cours d\'exécution, le Wait Event précis, et la session bloquante éventuelle (BLOCKING_SESSION).'
+        actionText: 'La ligne est écrite dans le tampon circulaire SGA avec le SID, SQL_ID et le Wait Event.',
+        technicalDetails: 'Si une session est bloquée par un verrou applicatif (enq: TX), ASH renseigne immédiatement la colonne magique BLOCKING_SESSION.'
       },
       {
         stepNum: 3,
-        title: 'Déchargement par MMNL vers SYSAUX (1/10e)',
+        title: 'Tampon ASH -> MMNL -> SYSAUX (Déchargement 1/10e)',
         from: 'ash_buffer',
         to: 'sysaux',
-        actionText: 'Le processus d\'arrière-plan MMNL décharge les données vers le disque avec un ratio de 1 sur 10.',
-        technicalDetails: 'Quand le tampon mémoire est plein ou toutes les heures, MMNL écrit 1 échantillon sur 10 dans la table WRH$_ACTIVE_SESSION_HISTORY (vue DBA_HIST_ACTIVE_SESS_HISTORY) dans SYSAUX pour économiser l\'espace disque.'
+        actionText: 'Le processus MMNL décharge les données vers le tablespace SYSAUX sur disque avec un ratio de 1 sur 10.',
+        technicalDetails: 'Quand le tampon est plein ou après 1 heure, MMNL écrit dans DBA_HIST_ACTIVE_SESS_HISTORY. Le sous-échantillonnage 1/10 économise 90% d\'espace disque.'
       }
     ]
   },
   {
     id: 'awr_snapshot',
-    title: '3. Capture de Snapshot AWR par MMON (60 min)',
-    badge: 'Boîte Noire Globale',
-    description: 'Le mécanisme automatique horaire capturant les compteurs cumulatifs pour le calcul des différentiels du rapport AWR.',
+    title: '3. Snapshot AWR Périodique par MMON (60 min)',
+    badge: 'Boîte Noire AWR',
+    description: 'Le mécanisme automatique horaire capturant les compteurs cumulatifs pour le calcul des deltas du rapport AWR.',
     steps: [
       {
         stepNum: 1,
-        title: 'Réveil Périodique du Processus MMON',
+        title: 'Réveil du Processus MMON (Toutes les 60 min)',
         from: 'mmon',
         to: 'buffer_cache',
-        actionText: 'Le minuteur de 60 minutes expire : MMON (Manageability Monitor) se réveille en arrière-plan.',
-        technicalDetails: 'MMON inspecte les compteurs cumulatifs de performance de toute l\'instance Oracle (nombre d\'I/O, temps CPU, exécutions SQL, évènements d\'attente système).'
+        actionText: 'Le timer 60 min expire : MMON (Manageability Monitor) lit les compteurs cumulatifs de la SGA.',
+        technicalDetails: 'MMON inspecte les statistiques de performance de toute l\'instance (I/O, temps CPU, exécutions SQL, évènements d\'attente).'
       },
       {
         stepNum: 2,
         title: 'Délégation au Processus Esclave m000',
         from: 'mmon',
         to: 'mmon',
-        actionText: 'MMON réveille un worker esclave (m000) pour effectuer le travail lourd d\'écriture.',
-        technicalDetails: 'Cette architecture évite que le processus principal MMON ne soit bloqué pendant les opérations I/O sur disque.'
+        actionText: 'MMON réveille un worker esclave (m000) pour effectuer l\'écriture disque sans bloquer la base.',
+        technicalDetails: 'Cette séparation évite que MMON ne soit ralenti par les I/O disque physiques.'
       },
       {
         stepNum: 3,
-        title: 'Écriture du Snapshot dans SYSAUX',
+        title: 'Écriture du Snapshot dans le Tablespace SYSAUX',
         from: 'mmon',
         to: 'sysaux',
         actionText: 'Le worker écrit le cliché horodaté (Snapshot ID) dans les tables WRH$* de SYSAUX.',
-        technicalDetails: 'Le snapshot est conservé pendant 8 jours par défaut. Lorsque le DBA exécute @?/rdbms/admin/awrrpt.sql, Oracle calcule simplement la différence (Delta) entre deux Snapshots consécutifs.'
+        technicalDetails: 'Conservé 8 jours par défaut. Le script awrrpt.sql calcule ensuite la différence entre deux snapshots consécutifs.'
       }
     ]
   },
@@ -285,43 +299,88 @@ const FLOW_SCENARIOS: FlowScenario[] = [
     id: 'commit_lgwr',
     title: '4. Validation (COMMIT) & Goulot LGWR',
     badge: 'Commit & Redo',
-    description: 'Comment une simple instruction COMMIT déclenche l\'écriture physique et peut provoquer l\'évènement d\'attente log file sync.',
+    description: 'Comment une instruction COMMIT réveille LGWR et peut provoquer l\'attente log file sync si committé en boucle.',
     steps: [
       {
         stepNum: 1,
-        title: 'Exécution du COMMIT par la Session',
+        title: 'Session Cliente -> Redo Log Buffer (COMMIT)',
         from: 'session_client',
         to: 'redo_buffer',
-        actionText: 'La session utilisateur exécute COMMIT : les modifications sont dans le Redo Log Buffer.',
-        technicalDetails: 'Pour respecter la règle ACID de Durabilité, la transaction ne peut être considérée validée tant que les vecteurs de redo ne sont pas écrits physiquement sur les disques non volatils.'
+        actionText: 'La session exécute COMMIT : les modifications sont dans le Redo Log Buffer de la SGA.',
+        technicalDetails: 'Règle ACID de Durabilité : la transaction n\'est validée que lorsque les vecteurs de redo sont écrits physiquement sur les disques non volatils.'
       },
       {
         stepNum: 2,
         title: 'Attente "log file sync" & Réveil de LGWR',
         from: 'redo_buffer',
         to: 'lgwr',
-        actionText: 'La session s\'endort sur l\'évènement "log file sync" et réveille d\'urgence le Log Writer (LGWR).',
-        technicalDetails: 'Si l\'application fait des COMMIT dans une boucle PL/SQL (50 000 fois), LGWR est submergé et le temps d\'attente "log file sync" explose en tête du rapport AWR !',
+        actionText: 'La session s\'endort sur l\'évènement "log file sync" et alerte le Log Writer (LGWR).',
+        technicalDetails: 'Si l\'application fait des COMMIT dans une boucle PL/SQL (50 000 fois), LGWR sature et "log file sync" explose dans l\'AWR !',
         waitEvent: 'log file sync'
       },
       {
         stepNum: 3,
-        title: 'Écriture Physique sur les Fichiers Redo Logs',
+        title: 'LGWR -> Redo Log Files (Écriture Disque)',
         from: 'lgwr',
         to: 'redofiles',
         actionText: 'LGWR écrit les blocs sur disque physique (log file parallel write) et réveille la session.',
-        technicalDetails: 'Dès que le disque confirme l\'écriture, LGWR acquitte la fin du commit. La session sort de son attente et reçoit "Commit complete".'
+        technicalDetails: 'Le disque confirme l\'écriture. LGWR acquitte la fin du commit. La session se débloque et reçoit "Commit complete".'
       }
     ]
   }
 ];
 
+// Helper to create high-resolution crisp 3D Canvas Text Sprites (always facing camera)
+function createTextSprite(
+  title: string, 
+  subtitle?: string, 
+  borderColor = '#0ea5e9', 
+  bgColor = 'rgba(11, 15, 25, 0.92)',
+  textColor = '#38bdf8'
+) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 160;
+  const ctx = canvas.getContext('2d')!;
+
+  // Background rounded card
+  ctx.fillStyle = bgColor;
+  ctx.strokeStyle = borderColor;
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.roundRect(10, 10, 492, 140, 24);
+  ctx.fill();
+  ctx.stroke();
+
+  // Title text
+  ctx.fillStyle = textColor;
+  ctx.font = 'bold 36px monospace, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = subtitle ? 'top' : 'middle';
+  ctx.fillText(title, 256, subtitle ? 26 : 80);
+
+  // Subtitle text
+  if (subtitle) {
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '24px sans-serif';
+    ctx.fillText(subtitle, 256, 84);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(4.6, 1.45, 1);
+  return sprite;
+}
+
 export default function OracleInstance3D() {
   const mountRef = useRef<HTMLDivElement>(null);
   const [selectedComponent, setSelectedComponent] = useState<ComponentDetail>(DETAILS_MAP.ash_buffer);
   const [isRotating, setIsRotating] = useState<boolean>(true);
-  const [particlesEnabled, setParticlesEnabled] = useState<boolean>(true);
+  const [showLabels, setShowLabels] = useState<boolean>(true);
   const [activePreset, setActivePreset] = useState<string>('overview');
+  const [displayMode, setDisplayMode] = useState<'3d' | 'schematic'>('3d');
 
   // Scenario states
   const [activeScenarioIndex, setActiveScenarioIndex] = useState<number>(0);
@@ -336,11 +395,11 @@ export default function OracleInstance3D() {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const interactiveObjectsRef = useRef<{ id: string; mesh: THREE.Object3D }[]>([]);
-  const particlesRef = useRef<THREE.Points | null>(null);
+  const labelsGroupRef = useRef<THREE.Group | null>(null);
   const arrowHelperRef = useRef<THREE.ArrowHelper | null>(null);
   const beaconRingsRef = useRef<THREE.Mesh[]>([]);
 
-  // 1. AUTO-PLAY TIMER FOR SCENARIO STEPS
+  // 1. AUTO-PLAY TIMER
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (isAutoPlaying) {
@@ -350,19 +409,18 @@ export default function OracleInstance3D() {
             sounds.playClick();
             return prev + 1;
           } else {
-            // Loop back to start
             sounds.playSnapshot();
             return 0;
           }
         });
-      }, 4000);
+      }, 4500);
     }
     return () => clearInterval(timer);
   }, [isAutoPlaying, activeScenario]);
 
-  // 2. THREE.JS INITIALIZATION
+  // 2. THREE.JS INITIALIZATION WITH CRISP LABELS
   useEffect(() => {
-    if (!mountRef.current) return;
+    if (!mountRef.current || displayMode !== '3d') return;
     const container = mountRef.current;
     const width = container.clientWidth;
     const height = container.clientHeight;
@@ -371,11 +429,11 @@ export default function OracleInstance3D() {
     const scene = new THREE.Scene();
     sceneRef.current = scene;
     scene.background = new THREE.Color(0x060813);
-    scene.fog = new THREE.FogExp2(0x060813, 0.022);
+    scene.fog = new THREE.FogExp2(0x060813, 0.02);
 
     // Camera
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    camera.position.set(0, 16, 28);
+    camera.position.set(0, 18, 32);
     camera.lookAt(0, 1, 0);
     cameraRef.current = camera;
 
@@ -389,31 +447,30 @@ export default function OracleInstance3D() {
     container.replaceChildren(renderer.domElement);
 
     // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
     scene.add(ambientLight);
 
     const dirLight = new THREE.DirectionalLight(0x38bdf8, 2.5);
     dirLight.position.set(15, 25, 20);
-    dirLight.castShadow = true;
     scene.add(dirLight);
 
-    const magentaLight = new THREE.PointLight(0xec4899, 3, 30);
-    magentaLight.position.set(0, 5, 0);
-    scene.add(magentaLight);
-
     const cyanLight = new THREE.PointLight(0x06b6d4, 3, 35);
-    cyanLight.position.set(-8, 3, -6);
+    cyanLight.position.set(-8, 4, -6);
     scene.add(cyanLight);
 
-    // Grid Floor
-    const grid = new THREE.GridHelper(40, 40, 0x1e293b, 0x0f172a);
-    grid.position.y = -5;
+    const pinkLight = new THREE.PointLight(0xec4899, 3, 30);
+    pinkLight.position.set(0, 4, 3);
+    scene.add(pinkLight);
+
+    // Floor Grid
+    const grid = new THREE.GridHelper(44, 44, 0x1e293b, 0x0f172a);
+    grid.position.y = -6;
     scene.add(grid);
 
-    // SGA Platform (Glass Box Wireframe)
-    const sgaGeo = new THREE.BoxGeometry(18, 4, 14);
+    // 1. SGA PLATFORM & OVERHEAD HEADER
+    const sgaGeo = new THREE.BoxGeometry(20, 4.5, 15);
     const sgaEdges = new THREE.EdgesGeometry(sgaGeo);
-    const sgaLineMat = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.5 });
+    const sgaLineMat = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.6 });
     const sgaWireframe = new THREE.LineSegments(sgaEdges, sgaLineMat);
     sgaWireframe.position.y = 2;
     scene.add(sgaWireframe);
@@ -430,123 +487,85 @@ export default function OracleInstance3D() {
     sgaBox.position.y = 2;
     scene.add(sgaBox);
 
+    // Labels Group
+    const labelsGroup = new THREE.Group();
+    scene.add(labelsGroup);
+    labelsGroupRef.current = labelsGroup;
+
+    // Header Sprite for SGA
+    const sgaHeaderSprite = createTextSprite('SGA (System Global Area)', 'Mémoire Partagée Principale', '#38bdf8', 'rgba(2, 132, 199, 0.85)', '#ffffff');
+    sgaHeaderSprite.position.set(0, 5.2, -3);
+    sgaHeaderSprite.scale.set(7.5, 2.2, 1);
+    labelsGroup.add(sgaHeaderSprite);
+
+    // Header Sprite for Disks
+    const diskHeaderSprite = createTextSprite('STOCKAGE PHYSIQUE (Disques)', 'Datafiles, Redo Logs & SYSAUX', '#3b82f6', 'rgba(15, 23, 42, 0.95)', '#60a5fa');
+    diskHeaderSprite.position.set(0, -1.8, 4);
+    diskHeaderSprite.scale.set(7.2, 2.0, 1);
+    labelsGroup.add(diskHeaderSprite);
+
     interactiveObjectsRef.current = [];
 
-    // Helper to create 3D components
+    // Helper to create labeled 3D block
     const createComponentMesh = (
-      id: string,
+      detail: ComponentDetail,
       geo: THREE.BufferGeometry,
       color: number,
-      pos: [number, number, number],
-      opacity = 0.85
+      opacity = 0.88
     ) => {
       const mat = new THREE.MeshStandardMaterial({
         color,
         roughness: 0.3,
         metalness: 0.4,
         emissive: color,
-        emissiveIntensity: 0.25,
+        emissiveIntensity: 0.28,
         transparent: opacity < 1,
         opacity
       });
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(...pos);
+      mesh.position.set(...detail.position);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       scene.add(mesh);
 
+      // Cyber wireframe edges
       const edges = new THREE.EdgesGeometry(geo);
-      const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4 });
+      const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
       const line = new THREE.LineSegments(edges, lineMat);
       mesh.add(line);
 
-      interactiveObjectsRef.current.push({ id, mesh });
+      interactiveObjectsRef.current.push({ id: detail.id, mesh });
+
+      // Add Billboard 3D Label
+      const sprite = createTextSprite(
+        detail.name,
+        detail.tag,
+        detail.color,
+        'rgba(11, 15, 25, 0.92)',
+        detail.color
+      );
+      sprite.position.set(detail.position[0], detail.position[1] + 2.4, detail.position[2]);
+      labelsGroup.add(sprite);
+
       return mesh;
     };
 
-    // 1. Session Client (Purple Octahedron outside SGA)
-    createComponentMesh(
-      'session_client',
-      new THREE.OctahedronGeometry(1.6),
-      0xa855f7,
-      DETAILS_MAP.session_client.position
-    );
+    // Instantiate All Components
+    createComponentMesh(DETAILS_MAP.session_client, new THREE.OctahedronGeometry(1.6), 0xa855f7);
+    createComponentMesh(DETAILS_MAP.buffer_cache, new THREE.BoxGeometry(6.5, 3.2, 5.5), 0x06b6d4);
+    createComponentMesh(DETAILS_MAP.shared_pool, new THREE.BoxGeometry(6.0, 3.2, 5.5), 0x8b5cf6);
+    createComponentMesh(DETAILS_MAP.ash_buffer, new THREE.CylinderGeometry(2.2, 2.2, 2.4, 32), 0xec4899);
+    createComponentMesh(DETAILS_MAP.redo_buffer, new THREE.BoxGeometry(15, 1.0, 1.6), 0xf97316);
 
-    // 2. Buffer Cache (Cyan Box)
-    createComponentMesh(
-      'buffer_cache',
-      new THREE.BoxGeometry(6, 2.8, 5.5),
-      0x06b6d4,
-      DETAILS_MAP.buffer_cache.position
-    );
+    const procGeo = new THREE.SphereGeometry(1.2, 32, 32);
+    createComponentMesh(DETAILS_MAP.mmon, procGeo, 0x10b981);
+    createComponentMesh(DETAILS_MAP.mmnl, procGeo, 0xeab308);
+    createComponentMesh(DETAILS_MAP.lgwr, procGeo, 0xf43f5e);
 
-    // 3. Shared Pool (Purple Box)
-    createComponentMesh(
-      'shared_pool',
-      new THREE.BoxGeometry(5.5, 2.8, 5.5),
-      0x8b5cf6,
-      DETAILS_MAP.shared_pool.position
-    );
-
-    // 4. ASH Circular Buffer (Pink Cylinder)
-    createComponentMesh(
-      'ash_buffer',
-      new THREE.CylinderGeometry(2.2, 2.2, 2.2, 32),
-      0xec4899,
-      DETAILS_MAP.ash_buffer.position
-    );
-
-    // 5. Redo Log Buffer (Orange Bar)
-    createComponentMesh(
-      'redo_buffer',
-      new THREE.BoxGeometry(14, 0.8, 1.6),
-      0xf97316,
-      DETAILS_MAP.redo_buffer.position
-    );
-
-    // 6. Background Processes (Spheres)
-    const procGeo = new THREE.SphereGeometry(1.0, 32, 32);
-    createComponentMesh('mmon', procGeo, 0x10b981, DETAILS_MAP.mmon.position);
-    createComponentMesh('mmnl', procGeo, 0xeab308, DETAILS_MAP.mmnl.position);
-    createComponentMesh('lgwr', procGeo, 0xf43f5e, DETAILS_MAP.lgwr.position);
-
-    // 7. Disk Storage (Cylinders)
-    const diskGeo = new THREE.CylinderGeometry(2.8, 2.8, 2.2, 32);
-    createComponentMesh('sysaux', diskGeo, 0x3b82f6, DETAILS_MAP.sysaux.position);
-
-    const dfGeo = new THREE.CylinderGeometry(2.4, 2.4, 2.2, 32);
-    createComponentMesh('datafiles', dfGeo, 0x0284c7, DETAILS_MAP.datafiles.position, 0.7);
-
-    const redoDiskGeo = new THREE.CylinderGeometry(2.2, 2.2, 2.2, 32);
-    createComponentMesh('redofiles', redoDiskGeo, 0xe11d48, DETAILS_MAP.redofiles.position, 0.7);
-
-    // Particles Simulation
-    const particleCount = 350;
-    const pGeo = new THREE.BufferGeometry();
-    const pPos = new Float32Array(particleCount * 3);
-    const pVel = new Float32Array(particleCount * 3);
-
-    for (let i = 0; i < particleCount; i++) {
-      pPos[i * 3] = (Math.random() - 0.5) * 16;
-      pPos[i * 3 + 1] = Math.random() * 10 - 2;
-      pPos[i * 3 + 2] = (Math.random() - 0.5) * 16;
-
-      pVel[i * 3] = (Math.random() - 0.5) * 0.04;
-      pVel[i * 3 + 1] = (Math.random() - 0.5) * 0.04;
-      pVel[i * 3 + 2] = (Math.random() - 0.5) * 0.04;
-    }
-
-    pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
-    const pMat = new THREE.PointsMaterial({
-      color: 0x38bdf8,
-      size: 0.18,
-      transparent: true,
-      opacity: 0.8,
-      blending: THREE.AdditiveBlending
-    });
-    const particles = new THREE.Points(pGeo, pMat);
-    scene.add(particles);
-    particlesRef.current = particles;
+    const diskGeo = new THREE.CylinderGeometry(2.6, 2.6, 2.2, 32);
+    createComponentMesh(DETAILS_MAP.sysaux, diskGeo, 0x3b82f6);
+    createComponentMesh(DETAILS_MAP.datafiles, diskGeo, 0x0284c7, 0.75);
+    createComponentMesh(DETAILS_MAP.redofiles, diskGeo, 0xe11d48, 0.75);
 
     // Raycaster for Clicking 3D Components
     const raycaster = new THREE.Raycaster();
@@ -581,14 +600,14 @@ export default function OracleInstance3D() {
       animationId = requestAnimationFrame(animate);
 
       if (isRotating && activePreset === 'overview') {
-        angle += 0.0025;
-        camera.position.x = Math.sin(angle) * 26;
-        camera.position.z = Math.cos(angle) * 26;
-        camera.position.y = 15;
+        angle += 0.0022;
+        camera.position.x = Math.sin(angle) * 32;
+        camera.position.z = Math.cos(angle) * 32;
+        camera.position.y = 18;
         camera.lookAt(0, 1, 0);
       }
 
-      // Pulse MMON, MMNL, ASH Buffer
+      // Pulse effects on MMON, MMNL, ASH Buffer
       const time = Date.now() * 0.003;
       interactiveObjectsRef.current.forEach(({ id, mesh }) => {
         if (id === 'mmon' || id === 'mmnl' || id === 'ash_buffer') {
@@ -596,21 +615,6 @@ export default function OracleInstance3D() {
           mesh.scale.set(scale, scale, scale);
         }
       });
-
-      // Update particles
-      if (particlesEnabled && particlesRef.current) {
-        const positions = particlesRef.current.geometry.attributes.position.array as Float32Array;
-        for (let i = 0; i < particleCount; i++) {
-          positions[i * 3] += pVel[i * 3];
-          positions[i * 3 + 1] += pVel[i * 3 + 1];
-          positions[i * 3 + 2] += pVel[i * 3 + 2];
-
-          if (positions[i * 3] > 10 || positions[i * 3] < -10) positions[i * 3] *= -0.9;
-          if (positions[i * 3 + 1] > 10 || positions[i * 3 + 1] < -4) positions[i * 3 + 1] = 8;
-          if (positions[i * 3 + 2] > 10 || positions[i * 3 + 2] < -10) positions[i * 3 + 2] *= -0.9;
-        }
-        particlesRef.current.geometry.attributes.position.needsUpdate = true;
-      }
 
       renderer.render(scene, camera);
     };
@@ -634,11 +638,18 @@ export default function OracleInstance3D() {
       window.removeEventListener('resize', handleResize);
       renderer.dispose();
     };
-  }, [isRotating, particlesEnabled, activePreset]);
+  }, [isRotating, activePreset, displayMode]);
 
-  // 3. UPDATE 3D ARROW & BEACONS WHEN SCENARIO STEP CHANGES
+  // 3. UPDATE VISIBILITY OF LABELS
   useEffect(() => {
-    if (!sceneRef.current) return;
+    if (labelsGroupRef.current) {
+      labelsGroupRef.current.visible = showLabels;
+    }
+  }, [showLabels]);
+
+  // 4. UPDATE 3D ARROW & BEACON WHEN SCENARIO STEP CHANGES
+  useEffect(() => {
+    if (!sceneRef.current || displayMode !== '3d') return;
     const scene = sceneRef.current;
 
     // Remove old arrow
@@ -659,20 +670,19 @@ export default function OracleInstance3D() {
     const fromPos = new THREE.Vector3(...fromComp.position);
     const toPos = new THREE.Vector3(...toComp.position);
 
-    // Create 3D Arrow Helper
     const dir = new THREE.Vector3().subVectors(toPos, fromPos);
     const length = dir.length();
     dir.normalize();
 
     if (length > 0.5) {
       const arrowColor = activeStep.waitEvent ? 0xf43f5e : 0x06b6d4;
-      const arrow = new THREE.ArrowHelper(dir, fromPos, length - 1.2, arrowColor, 1.2, 0.8);
+      const arrow = new THREE.ArrowHelper(dir, fromPos, length - 1.5, arrowColor, 1.4, 0.9);
       scene.add(arrow);
       arrowHelperRef.current = arrow;
     }
 
-    // Create pulsing beacon ring on target component
-    const ringGeo = new THREE.RingGeometry(1.6, 2.0, 32);
+    // Pulsing beacon ring on target
+    const ringGeo = new THREE.RingGeometry(1.8, 2.3, 32);
     const ringMat = new THREE.MeshBasicMaterial({
       color: activeStep.waitEvent ? 0xf43f5e : 0x38bdf8,
       side: THREE.DoubleSide,
@@ -686,9 +696,8 @@ export default function OracleInstance3D() {
     scene.add(ring);
     beaconRingsRef.current.push(ring);
 
-    // Also update selected component to the destination
     setSelectedComponent(toComp);
-  }, [activeStep]);
+  }, [activeStep, displayMode]);
 
   const handleNextStep = () => {
     sounds.playClick();
@@ -716,223 +725,403 @@ export default function OracleInstance3D() {
 
   return (
     <div className="w-full flex flex-col gap-6">
-      {/* Scenario Selector Ribbon */}
+      {/* Top Controls: Scenarios & 2D/3D Mode Switcher */}
       <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 backdrop-blur-md shadow-2xl flex flex-wrap items-center justify-between gap-4">
         <div>
-          <span className="text-xs font-mono font-semibold text-cyan-400 uppercase tracking-wider block mb-1 flex items-center gap-1.5">
-            <Zap className="w-4 h-4 text-cyan-400" /> Scénarios Interactifs de Flux (Flèches &amp; Signes 3D)
-          </span>
-          <h3 className="text-base font-bold text-white">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
+            <span className="text-xs font-mono font-semibold text-cyan-400 uppercase tracking-wider">
+              Schématisation Interactive de l&apos;Instance Oracle
+            </span>
+          </div>
+          <h3 className="text-base font-bold text-white mt-0.5">
             {activeScenario.title}
           </h3>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {FLOW_SCENARIOS.map((sc, idx) => {
-            const isCurrent = idx === activeScenarioIndex;
-            return (
+          {/* Switcher 3D vs 2D Schematic */}
+          <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+            <button
+              onClick={() => {
+                setDisplayMode('3d');
+                sounds.playClick();
+              }}
+              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                displayMode === '3d'
+                  ? 'bg-cyan-500 text-slate-950 shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>Vue 3D Flèches</span>
+            </button>
+            <button
+              onClick={() => {
+                setDisplayMode('schematic');
+                sounds.playClick();
+              }}
+              className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 ${
+                displayMode === 'schematic'
+                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Grid className="w-3.5 h-3.5" />
+              <span>Schéma 2D Détaillé</span>
+            </button>
+          </div>
+
+          {/* Scenario Buttons */}
+          <div className="flex flex-wrap gap-1 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+            {FLOW_SCENARIOS.map((sc, idx) => (
               <button
                 key={sc.id}
                 onClick={() => handleSelectScenario(idx)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                  isCurrent
-                    ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg shadow-cyan-500/20 ring-2 ring-cyan-400/40'
-                    : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-750'
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                  idx === activeScenarioIndex
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-sm'
+                    : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <span>{sc.badge}</span>
+                {sc.badge}
               </button>
-            );
-          })}
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Main 3D Canvas + Flow Controller Card */}
-      <div className="relative w-full h-[640px] rounded-2xl overflow-hidden border border-slate-800 bg-slate-950/80 backdrop-blur-md shadow-2xl flex flex-col lg:flex-row">
-        {/* 3D Viewport */}
-        <div className="relative flex-1 h-[380px] lg:h-full cursor-grab active:cursor-grabbing" ref={mountRef}>
-          {/* Top Overlays: Rotation & Particles Toggle */}
-          <div className="absolute top-4 left-4 z-10 flex flex-wrap gap-2">
-            <button
-              onClick={() => {
-                setIsRotating(!isRotating);
-                sounds.playClick();
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all shadow-lg ${
-                isRotating
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-500/30'
-                  : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-white'
-              }`}
-            >
-              {isRotating ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-              {isRotating ? 'Rotation ON' : 'Rotation Pause'}
-            </button>
+      {displayMode === '3d' ? (
+        /* 3D VIEWPORT WITH LABELS & ARROWS */
+        <div className="relative w-full h-[650px] rounded-2xl overflow-hidden border border-slate-800 bg-slate-950/80 backdrop-blur-md shadow-2xl flex flex-col lg:flex-row">
+          <div className="relative flex-1 h-[400px] lg:h-full cursor-grab active:cursor-grabbing" ref={mountRef}>
+            {/* Top Toolbar: Rotation & Labels Toggle */}
+            <div className="absolute top-4 left-4 z-10 flex flex-wrap gap-2">
+              <button
+                onClick={() => {
+                  setIsRotating(!isRotating);
+                  sounds.playClick();
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all shadow-lg ${
+                  isRotating
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-500/30'
+                    : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-white'
+                }`}
+              >
+                {isRotating ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                {isRotating ? 'Rotation ON' : 'Rotation Pause'}
+              </button>
 
-            <button
-              onClick={() => {
-                setIsAutoPlaying(!isAutoPlaying);
-                sounds.playClick();
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all shadow-lg ${
-                isAutoPlaying
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/30 animate-pulse'
-                  : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-white'
-              }`}
-            >
-              {isAutoPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 text-emerald-400" />}
-              {isAutoPlaying ? 'Auto-Défilement Étape' : 'Lecture Auto'}
-            </button>
-          </div>
+              <button
+                onClick={() => {
+                  setShowLabels(!showLabels);
+                  sounds.playClick();
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all shadow-lg ${
+                  showLabels
+                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                    : 'bg-slate-800 text-slate-400 border border-slate-700'
+                }`}
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>Titres 3D {showLabels ? 'Affichés' : 'Masqués'}</span>
+              </button>
 
-          {/* Floating On-Screen 3D Step Sign (Flèche & Direction) */}
-          <div className="absolute top-4 right-4 z-10 max-w-xs bg-slate-900/90 backdrop-blur p-3 rounded-xl border border-cyan-500/40 shadow-2xl flex flex-col gap-1.5">
-            <div className="flex items-center justify-between text-xs font-mono">
-              <span className="text-cyan-400 font-bold flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5" /> FLÈCHE 3D ACTIVE
-              </span>
-              <span className="px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 text-[10px] border border-cyan-800">
-                Étape {activeStep.stepNum} / {activeScenario.steps.length}
-              </span>
+              <button
+                onClick={() => {
+                  setIsAutoPlaying(!isAutoPlaying);
+                  sounds.playClick();
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all shadow-lg ${
+                  isAutoPlaying
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse'
+                    : 'bg-slate-800 text-slate-400 border border-slate-700'
+                }`}
+              >
+                {isAutoPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 text-emerald-400" />}
+                <span>{isAutoPlaying ? 'Lecture Auto ON' : 'Lecture Auto'}</span>
+              </button>
             </div>
 
-            <div className="flex items-center gap-2 text-xs font-bold text-white pt-1">
-              <span className="text-cyan-300 font-mono text-[11px] truncate max-w-[90px]">
-                {DETAILS_MAP[activeStep.from]?.name}
-              </span>
-              <ArrowRight className="w-4 h-4 text-amber-400 shrink-0" />
-              <span className="text-pink-300 font-mono text-[11px] truncate max-w-[90px]">
-                {DETAILS_MAP[activeStep.to]?.name}
-              </span>
-            </div>
-
-            {activeStep.waitEvent && (
-              <div className="mt-1 p-1.5 rounded bg-rose-950/60 border border-rose-800/60 text-[10px] text-rose-300 flex items-center gap-1 font-mono">
-                <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
-                <span>Wait Event: {activeStep.waitEvent}</span>
+            {/* Active Step Sign Floating on Screen */}
+            <div className="absolute top-4 right-4 z-10 max-w-xs bg-slate-900/95 backdrop-blur p-3.5 rounded-2xl border border-cyan-500/50 shadow-2xl flex flex-col gap-1.5">
+              <div className="flex items-center justify-between text-xs font-mono">
+                <span className="text-cyan-400 font-bold flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5" /> TRAJET FLÈCHE 3D
+                </span>
+                <span className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 text-[10px] border border-cyan-800 font-bold">
+                  Étape {activeStep.stepNum} / {activeScenario.steps.length}
+                </span>
               </div>
-            )}
-          </div>
 
-          {/* Bottom Interactive Step Controller Bar */}
-          <div className="absolute bottom-4 left-4 right-4 z-10 flex items-center justify-between gap-3 bg-slate-900/95 backdrop-blur-md p-2.5 rounded-2xl border border-slate-800 shadow-2xl">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handlePrevStep}
-                className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition"
-                title="Étape précédente"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button
-                onClick={handleNextStep}
-                className="p-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold hover:brightness-110 shadow-lg shadow-cyan-500/25 transition flex items-center gap-1"
-                title="Étape suivante"
-              >
-                <span className="text-xs hidden sm:inline">Étape Suivante</span>
-                <ChevronRight className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2 text-xs font-bold text-white pt-1">
+                <span className="text-cyan-300 font-mono text-[11px] truncate max-w-[95px]">
+                  {DETAILS_MAP[activeStep.from]?.name}
+                </span>
+                <ArrowRight className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="text-pink-300 font-mono text-[11px] truncate max-w-[95px]">
+                  {DETAILS_MAP[activeStep.to]?.name}
+                </span>
+              </div>
+
+              {activeStep.waitEvent && (
+                <div className="mt-1 p-1.5 rounded bg-rose-950/60 border border-rose-800/60 text-[10px] text-rose-300 flex items-center gap-1 font-mono font-bold">
+                  <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                  <span>Wait Event: {activeStep.waitEvent}</span>
+                </div>
+              )}
             </div>
 
-            <div className="flex items-center gap-1.5 overflow-x-auto py-1">
-              {activeScenario.steps.map((st, i) => (
+            {/* Step Navigation Bar */}
+            <div className="absolute bottom-4 left-4 right-4 z-10 flex items-center justify-between gap-3 bg-slate-900/95 backdrop-blur-md p-2.5 rounded-2xl border border-slate-800 shadow-2xl">
+              <div className="flex items-center gap-2">
                 <button
-                  key={st.stepNum}
-                  onClick={() => {
-                    sounds.playClick();
-                    setActiveStepIndex(i);
-                  }}
-                  className={`w-7 h-7 rounded-lg text-xs font-mono font-bold transition flex items-center justify-center shrink-0 ${
-                    i === activeStepIndex
-                      ? 'bg-cyan-500 text-slate-950 shadow-md ring-2 ring-cyan-400/50'
-                      : 'bg-slate-800 text-slate-400 hover:text-white'
-                  }`}
+                  onClick={handlePrevStep}
+                  className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition"
                 >
-                  {st.stepNum}
+                  <ChevronLeft className="w-4 h-4" />
                 </button>
-              ))}
-            </div>
-
-            <span className="text-xs text-slate-300 font-semibold truncate hidden md:inline">
-              {activeStep.title}
-            </span>
-          </div>
-        </div>
-
-        {/* Right Column: Detailed Flow Explanation & Architecture Inspector (380px) */}
-        <div className="w-full lg:w-[400px] p-5 bg-slate-900/95 border-t lg:border-t-0 lg:border-l border-slate-800 flex flex-col justify-between overflow-y-auto">
-          <div>
-            {/* Step Action Box */}
-            <div className="p-4 rounded-xl bg-gradient-to-br from-cyan-950/40 via-slate-900 to-blue-950/40 border border-cyan-800/50 shadow-inner">
-              <div className="flex items-center justify-between pb-2 border-b border-cyan-900/40">
-                <span className="text-xs font-mono font-bold text-cyan-300 flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5" /> Étape {activeStep.stepNum} : Ce qui se passe
-                </span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-900/60 text-cyan-200">
-                  Temps Réel
-                </span>
+                <button
+                  onClick={handleNextStep}
+                  className="p-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold hover:brightness-110 shadow-lg shadow-cyan-500/25 transition flex items-center gap-1"
+                >
+                  <span className="text-xs hidden sm:inline">Étape Suivante</span>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
 
-              <h4 className="text-sm font-bold text-white mt-2 leading-snug">
+              <div className="flex items-center gap-1.5 overflow-x-auto py-1">
+                {activeScenario.steps.map((st, i) => (
+                  <button
+                    key={st.stepNum}
+                    onClick={() => {
+                      sounds.playClick();
+                      setActiveStepIndex(i);
+                    }}
+                    className={`w-7 h-7 rounded-lg text-xs font-mono font-bold transition flex items-center justify-center shrink-0 ${
+                      i === activeStepIndex
+                        ? 'bg-cyan-500 text-slate-950 shadow-md ring-2 ring-cyan-400/50'
+                        : 'bg-slate-800 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {st.stepNum}
+                  </button>
+                ))}
+              </div>
+
+              <span className="text-xs text-slate-300 font-semibold truncate hidden md:inline">
                 {activeStep.title}
-              </h4>
-              <p className="text-xs text-cyan-200/90 mt-1.5 leading-relaxed font-sans">
-                {activeStep.actionText}
-              </p>
-
-              <div className="mt-3 p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] text-slate-300 leading-relaxed font-sans">
-                <strong className="text-amber-400 block mb-0.5 font-mono">Détail Technique Oracle :</strong>
-                {activeStep.technicalDetails}
-              </div>
+              </span>
             </div>
+          </div>
 
-            {/* Currently Focused Component Inspector */}
-            <div className="mt-5">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                <span className="text-xs uppercase tracking-wider font-semibold text-slate-400 flex items-center gap-1.5">
-                  <Info className="w-4 h-4 text-purple-400" /> Cible 3D : {selectedComponent.name}
-                </span>
-                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300">
-                  {selectedComponent.category}
-                </span>
-              </div>
+          {/* Right Column: Detailed Step Explanation Card */}
+          <div className="w-full lg:w-[400px] p-5 bg-slate-900/95 border-t lg:border-t-0 lg:border-l border-slate-800 flex flex-col justify-between overflow-y-auto">
+            <div>
+              <div className="p-4 rounded-xl bg-gradient-to-br from-cyan-950/40 via-slate-900 to-blue-950/40 border border-cyan-800/50 shadow-inner">
+                <div className="flex items-center justify-between pb-2 border-b border-cyan-900/40">
+                  <span className="text-xs font-mono font-bold text-cyan-300 flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5" /> Étape {activeStep.stepNum} : Ce qui se passe
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-900/60 text-cyan-200">
+                    Temps Réel
+                  </span>
+                </div>
 
-              <p className="mt-2 text-xs text-slate-300 leading-relaxed">
-                {selectedComponent.role}
-              </p>
-
-              <div className="mt-3 p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                <span className="text-[11px] font-semibold text-pink-400 flex items-center gap-1.5 mb-1">
-                  <Activity className="w-3.5 h-3.5" /> Rôle dans AWR &amp; ASH
-                </span>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  {selectedComponent.awrAshRole}
+                <h4 className="text-sm font-bold text-white mt-2 leading-snug">
+                  {activeStep.title}
+                </h4>
+                <p className="text-xs text-cyan-200/90 mt-1.5 leading-relaxed font-sans">
+                  {activeStep.actionText}
                 </p>
+
+                <div className="mt-3 p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] text-slate-300 leading-relaxed font-sans">
+                  <strong className="text-amber-400 block mb-0.5 font-mono">Détail Technique Oracle :</strong>
+                  {activeStep.technicalDetails}
+                </div>
               </div>
 
-              <div className="mt-3">
-                <span className="text-[11px] font-semibold text-slate-400 mb-1.5 flex items-center gap-1">
-                  <Database className="w-3 h-3 text-cyan-400" /> Vues Oracle Clés :
-                </span>
-                <div className="flex flex-wrap gap-1">
-                  {selectedComponent.views.map((v) => (
-                    <span
-                      key={v}
-                      className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-cyan-300 border border-slate-700"
-                    >
-                      {v}
-                    </span>
-                  ))}
+              {/* Inspector of Selected Component */}
+              <div className="mt-5">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                  <span className="text-xs uppercase tracking-wider font-semibold text-slate-400 flex items-center gap-1.5">
+                    <Info className="w-4 h-4 text-purple-400" /> Cible 3D : {selectedComponent.name}
+                  </span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300">
+                    {selectedComponent.category}
+                  </span>
+                </div>
+
+                <p className="mt-2 text-xs text-slate-300 leading-relaxed">
+                  {selectedComponent.role}
+                </p>
+
+                <div className="mt-3 p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+                  <span className="text-[11px] font-semibold text-pink-400 flex items-center gap-1.5 mb-1">
+                    <Activity className="w-3.5 h-3.5" /> Rôle dans AWR &amp; ASH
+                  </span>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    {selectedComponent.awrAshRole}
+                  </p>
+                </div>
+
+                <div className="mt-3">
+                  <span className="text-[11px] font-semibold text-slate-400 mb-1.5 flex items-center gap-1">
+                    <Database className="w-3 h-3 text-cyan-400" /> Vues Oracle Associées :
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {selectedComponent.views.map((v) => (
+                      <span
+                        key={v}
+                        className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-cyan-300 border border-slate-700"
+                      >
+                        {v}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500">
-            <span>Cliquez sur une flèche ou un bloc 3D</span>
-            <span className="font-mono text-cyan-400">Oracle 19c/21c</span>
+            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500">
+              <span>Cliquez sur un bloc 3D pour l&apos;inspecter</span>
+              <span className="font-mono text-cyan-400">Oracle 19c/21c</span>
+            </div>
           </div>
         </div>
-      </div>
+      ) : (
+        /* 2D HIGH-DEFINITION SCHEMATIC VIEW (Schéma d'Architecture Coupe SGBD) */
+        <div className="w-full rounded-2xl bg-slate-950 border border-slate-800 p-6 md:p-8 shadow-2xl flex flex-col gap-6">
+          <div className="flex flex-wrap items-center justify-between pb-4 border-b border-slate-800 gap-3">
+            <div>
+              <span className="text-xs font-mono text-purple-400 uppercase tracking-wider font-bold block mb-1">
+                Vue Schéma d&apos;Architecture Officielle
+              </span>
+              <h3 className="text-xl font-bold text-white">
+                Structure de l&apos;Instance Oracle (SGA, Processus d&apos;Arrière-Plan &amp; Disques)
+              </h3>
+            </div>
+            <span className="text-xs font-mono text-slate-400 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
+              Schéma Standard SGBD
+            </span>
+          </div>
+
+          {/* Interactive 2D Architecture Canvas */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left: User Sessions & PGA (3 cols) */}
+            <div className="lg:col-span-3 flex flex-col gap-4">
+              <div className="p-4 rounded-2xl bg-purple-950/30 border border-purple-800/60 flex flex-col gap-3">
+                <div className="flex items-center gap-2 text-purple-300 font-bold text-sm">
+                  <Cpu className="w-4 h-4 text-purple-400" />
+                  <span>Sessions &amp; PGA</span>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-900 border border-purple-900/50 text-xs text-slate-300">
+                  <strong className="text-white block mb-1">PGA (Program Global Area)</strong>
+                  Mémoire privée non partagée allouée à chaque session pour le tri et le hashage.
+                </div>
+                <div className="p-3 rounded-xl bg-slate-900 border border-purple-900/50 text-xs text-slate-300">
+                  <strong className="text-white block mb-1">Processus Serveurs</strong>
+                  Exécutent les requêtes SQL et transmettent les commandes à la SGA.
+                </div>
+              </div>
+            </div>
+
+            {/* Middle: SGA Container (6 cols) */}
+            <div className="lg:col-span-6 flex flex-col gap-4">
+              <div className="p-5 rounded-2xl bg-cyan-950/20 border-2 border-cyan-500/40 flex flex-col gap-4">
+                <div className="flex items-center justify-between border-b border-cyan-800/40 pb-2">
+                  <span className="font-extrabold text-sm text-cyan-300 flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-cyan-400" />
+                    SGA (SYSTEM GLOBAL AREA) — Mémoire Partagée
+                  </span>
+                  <span className="text-[10px] font-mono bg-cyan-900/60 text-cyan-200 px-2 py-0.5 rounded">
+                    SGA_TARGET
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Buffer Cache */}
+                  <div className="p-3.5 rounded-xl bg-slate-900/90 border border-cyan-500/50 flex flex-col gap-1">
+                    <span className="font-bold text-xs text-cyan-300">Database Buffer Cache</span>
+                    <span className="text-[11px] text-slate-400">Copies en RAM des blocs de 8 Ko lus sur disque.</span>
+                    <span className="text-[10px] font-mono text-cyan-400 mt-1">DB_CACHE_SIZE • V$BH</span>
+                  </div>
+
+                  {/* Shared Pool */}
+                  <div className="p-3.5 rounded-xl bg-slate-900/90 border border-purple-500/50 flex flex-col gap-1">
+                    <span className="font-bold text-xs text-purple-300">Shared Pool</span>
+                    <span className="text-[11px] text-slate-400">Plans compilés (Library Cache) et dictionnaire.</span>
+                    <span className="text-[10px] font-mono text-purple-400 mt-1">SHARED_POOL_SIZE • V$SQL</span>
+                  </div>
+
+                  {/* ASH Circular Buffer */}
+                  <div className="p-3.5 rounded-xl bg-slate-900/90 border border-pink-500/50 flex flex-col gap-1 sm:col-span-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-xs text-pink-300">Tampon Circulaire ASH (1s Sampling)</span>
+                      <span className="text-[10px] font-mono bg-pink-950 text-pink-300 px-1.5 py-0.2 rounded">~2 Mo / CPU</span>
+                    </div>
+                    <span className="text-[11px] text-slate-400">Échantillonne les sessions actives chaque seconde en RAM sans verrous lourds.</span>
+                    <span className="text-[10px] font-mono text-pink-400 mt-1">V$ACTIVE_SESSION_HISTORY</span>
+                  </div>
+
+                  {/* Redo Log Buffer */}
+                  <div className="p-3.5 rounded-xl bg-slate-900/90 border border-amber-500/50 flex flex-col gap-1 sm:col-span-2">
+                    <span className="font-bold text-xs text-amber-300">Redo Log Buffer</span>
+                    <span className="text-[11px] text-slate-400">Enregistre les modifications (vecteurs de redo) avant écriture par LGWR.</span>
+                    <span className="text-[10px] font-mono text-amber-400 mt-1">LOG_BUFFER</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Background Processes (3 cols) */}
+            <div className="lg:col-span-3 flex flex-col gap-3">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider font-mono">
+                Processus d&apos;Arrière-Plan
+              </span>
+
+              <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-800/50 text-xs">
+                <span className="font-bold text-emerald-300 block mb-0.5">MMON (AWR Engine)</span>
+                Capture les clichés AWR toutes les 60 min vers SYSAUX.
+              </div>
+
+              <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-800/50 text-xs">
+                <span className="font-bold text-amber-300 block mb-0.5">MMNL (ASH Flusher)</span>
+                Décharge 1 échantillon ASH sur 10 vers SYSAUX.
+              </div>
+
+              <div className="p-3 rounded-xl bg-rose-950/30 border border-rose-800/50 text-xs">
+                <span className="font-bold text-rose-300 block mb-0.5">LGWR (Log Writer)</span>
+                Écrit le Redo Buffer vers les Redo Logs lors des COMMITs.
+              </div>
+
+              <div className="p-3 rounded-xl bg-blue-950/30 border border-blue-800/50 text-xs">
+                <span className="font-bold text-blue-300 block mb-0.5">DBWR (Database Writer)</span>
+                Écrit les blocs modifiés (dirty) vers les Datafiles.
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Disk Row */}
+          <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-wrap items-center justify-between gap-4">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono flex items-center gap-1.5">
+              <HardDrive className="w-4 h-4 text-blue-400" /> Stockage Physique sur Disque
+            </span>
+
+            <div className="flex flex-wrap gap-3 text-xs font-mono">
+              <div className="px-3 py-1.5 rounded-lg bg-blue-950/60 border border-blue-800/60 text-blue-300">
+                📁 SYSAUX.DBF (Référentiel AWR DBA_HIST_*)
+              </div>
+              <div className="px-3 py-1.5 rounded-lg bg-cyan-950/60 border border-cyan-800/60 text-cyan-300">
+                💾 DATAFILES (.dbf : Tables &amp; Index)
+              </div>
+              <div className="px-3 py-1.5 rounded-lg bg-rose-950/60 border border-rose-800/60 text-rose-300">
+                📝 REDO LOGS (.log : Redo 1, 2, 3)
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
