@@ -21,11 +21,12 @@ import {
   AlertTriangle,
   Zap,
   Grid,
-  FileText
+  FileText,
+  Workflow
 } from 'lucide-react';
 import { sounds } from '@/lib/sounds';
 
-interface ComponentDetail {
+export interface ComponentDetail {
   id: string;
   name: string;
   tag: string;
@@ -38,7 +39,7 @@ interface ComponentDetail {
   position: [number, number, number];
 }
 
-const DETAILS_MAP: Record<string, ComponentDetail> = {
+export const DETAILS_MAP: Record<string, ComponentDetail> = {
   session_client: {
     id: 'session_client',
     name: 'Session Utilisateur & PGA',
@@ -330,12 +331,11 @@ const FLOW_SCENARIOS: FlowScenario[] = [
   }
 ];
 
-// Helper to create high-resolution crisp 3D Canvas Text Sprites (always facing camera)
 function createTextSprite(
   title: string, 
   subtitle?: string, 
   borderColor = '#0ea5e9', 
-  bgColor = 'rgba(11, 15, 25, 0.92)',
+  bgColor = 'rgba(11, 15, 25, 0.94)',
   textColor = '#38bdf8'
 ) {
   const canvas = document.createElement('canvas');
@@ -343,7 +343,6 @@ function createTextSprite(
   canvas.height = 160;
   const ctx = canvas.getContext('2d')!;
 
-  // Background rounded card
   ctx.fillStyle = bgColor;
   ctx.strokeStyle = borderColor;
   ctx.lineWidth = 6;
@@ -352,14 +351,12 @@ function createTextSprite(
   ctx.fill();
   ctx.stroke();
 
-  // Title text
   ctx.fillStyle = textColor;
   ctx.font = 'bold 36px monospace, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = subtitle ? 'top' : 'middle';
   ctx.fillText(title, 256, subtitle ? 26 : 80);
 
-  // Subtitle text
   if (subtitle) {
     ctx.fillStyle = '#94a3b8';
     ctx.font = '24px sans-serif';
@@ -379,7 +376,6 @@ export default function OracleInstance3D() {
   const [selectedComponent, setSelectedComponent] = useState<ComponentDetail>(DETAILS_MAP.ash_buffer);
   const [isRotating, setIsRotating] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
-  const [activePreset, setActivePreset] = useState<string>('overview');
   const [displayMode, setDisplayMode] = useState<'3d' | 'schematic'>('3d');
 
   // Scenario states
@@ -418,26 +414,23 @@ export default function OracleInstance3D() {
     return () => clearInterval(timer);
   }, [isAutoPlaying, activeScenario]);
 
-  // 2. THREE.JS INITIALIZATION WITH CRISP LABELS
+  // 2. THREE.JS INITIALIZATION (ALWAYS MOUNTED, NEVER DESTROYED)
   useEffect(() => {
-    if (!mountRef.current || displayMode !== '3d') return;
+    if (!mountRef.current) return;
     const container = mountRef.current;
-    const width = container.clientWidth;
-    const height = container.clientHeight;
+    const width = container.clientWidth || 800;
+    const height = container.clientHeight || 650;
 
-    // Scene
     const scene = new THREE.Scene();
     sceneRef.current = scene;
     scene.background = new THREE.Color(0x060813);
     scene.fog = new THREE.FogExp2(0x060813, 0.02);
 
-    // Camera
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
     camera.position.set(0, 18, 32);
     camera.lookAt(0, 1, 0);
     cameraRef.current = camera;
 
-    // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -446,7 +439,6 @@ export default function OracleInstance3D() {
     rendererRef.current = renderer;
     container.replaceChildren(renderer.domElement);
 
-    // Lights
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
     scene.add(ambientLight);
 
@@ -462,12 +454,11 @@ export default function OracleInstance3D() {
     pinkLight.position.set(0, 4, 3);
     scene.add(pinkLight);
 
-    // Floor Grid
     const grid = new THREE.GridHelper(44, 44, 0x1e293b, 0x0f172a);
     grid.position.y = -6;
     scene.add(grid);
 
-    // 1. SGA PLATFORM & OVERHEAD HEADER
+    // SGA Platform & Wireframe Box
     const sgaGeo = new THREE.BoxGeometry(20, 4.5, 15);
     const sgaEdges = new THREE.EdgesGeometry(sgaGeo);
     const sgaLineMat = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.6 });
@@ -487,18 +478,16 @@ export default function OracleInstance3D() {
     sgaBox.position.y = 2;
     scene.add(sgaBox);
 
-    // Labels Group
     const labelsGroup = new THREE.Group();
     scene.add(labelsGroup);
     labelsGroupRef.current = labelsGroup;
 
-    // Header Sprite for SGA
+    // Header Sprites
     const sgaHeaderSprite = createTextSprite('SGA (System Global Area)', 'Mémoire Partagée Principale', '#38bdf8', 'rgba(2, 132, 199, 0.85)', '#ffffff');
     sgaHeaderSprite.position.set(0, 5.2, -3);
     sgaHeaderSprite.scale.set(7.5, 2.2, 1);
     labelsGroup.add(sgaHeaderSprite);
 
-    // Header Sprite for Disks
     const diskHeaderSprite = createTextSprite('STOCKAGE PHYSIQUE (Disques)', 'Datafiles, Redo Logs & SYSAUX', '#3b82f6', 'rgba(15, 23, 42, 0.95)', '#60a5fa');
     diskHeaderSprite.position.set(0, -1.8, 4);
     diskHeaderSprite.scale.set(7.2, 2.0, 1);
@@ -506,7 +495,6 @@ export default function OracleInstance3D() {
 
     interactiveObjectsRef.current = [];
 
-    // Helper to create labeled 3D block
     const createComponentMesh = (
       detail: ComponentDetail,
       geo: THREE.BufferGeometry,
@@ -528,7 +516,6 @@ export default function OracleInstance3D() {
       mesh.receiveShadow = true;
       scene.add(mesh);
 
-      // Cyber wireframe edges
       const edges = new THREE.EdgesGeometry(geo);
       const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
       const line = new THREE.LineSegments(edges, lineMat);
@@ -536,7 +523,6 @@ export default function OracleInstance3D() {
 
       interactiveObjectsRef.current.push({ id: detail.id, mesh });
 
-      // Add Billboard 3D Label
       const sprite = createTextSprite(
         detail.name,
         detail.tag,
@@ -550,7 +536,6 @@ export default function OracleInstance3D() {
       return mesh;
     };
 
-    // Instantiate All Components
     createComponentMesh(DETAILS_MAP.session_client, new THREE.OctahedronGeometry(1.6), 0xa855f7);
     createComponentMesh(DETAILS_MAP.buffer_cache, new THREE.BoxGeometry(6.5, 3.2, 5.5), 0x06b6d4);
     createComponentMesh(DETAILS_MAP.shared_pool, new THREE.BoxGeometry(6.0, 3.2, 5.5), 0x8b5cf6);
@@ -567,7 +552,6 @@ export default function OracleInstance3D() {
     createComponentMesh(DETAILS_MAP.datafiles, diskGeo, 0x0284c7, 0.75);
     createComponentMesh(DETAILS_MAP.redofiles, diskGeo, 0xe11d48, 0.75);
 
-    // Raycaster for Clicking 3D Components
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
@@ -592,14 +576,13 @@ export default function OracleInstance3D() {
 
     container.addEventListener('pointerdown', handlePointerDown);
 
-    // Animation Loop
     let animationId: number;
     let angle = 0;
 
     const animate = () => {
       animationId = requestAnimationFrame(animate);
 
-      if (isRotating && activePreset === 'overview') {
+      if (isRotating) {
         angle += 0.0022;
         camera.position.x = Math.sin(angle) * 32;
         camera.position.z = Math.cos(angle) * 32;
@@ -607,7 +590,6 @@ export default function OracleInstance3D() {
         camera.lookAt(0, 1, 0);
       }
 
-      // Pulse effects on MMON, MMNL, ASH Buffer
       const time = Date.now() * 0.003;
       interactiveObjectsRef.current.forEach(({ id, mesh }) => {
         if (id === 'mmon' || id === 'mmnl' || id === 'ash_buffer') {
@@ -638,27 +620,25 @@ export default function OracleInstance3D() {
       window.removeEventListener('resize', handleResize);
       renderer.dispose();
     };
-  }, [isRotating, activePreset, displayMode]);
+  }, [isRotating]);
 
-  // 3. UPDATE VISIBILITY OF LABELS
+  // Update label visibility
   useEffect(() => {
     if (labelsGroupRef.current) {
       labelsGroupRef.current.visible = showLabels;
     }
   }, [showLabels]);
 
-  // 4. UPDATE 3D ARROW & BEACON WHEN SCENARIO STEP CHANGES
+  // Update 3D Arrow
   useEffect(() => {
-    if (!sceneRef.current || displayMode !== '3d') return;
+    if (!sceneRef.current) return;
     const scene = sceneRef.current;
 
-    // Remove old arrow
     if (arrowHelperRef.current) {
       scene.remove(arrowHelperRef.current);
       arrowHelperRef.current = null;
     }
 
-    // Remove old beacon rings
     beaconRingsRef.current.forEach(ring => scene.remove(ring));
     beaconRingsRef.current = [];
 
@@ -681,7 +661,6 @@ export default function OracleInstance3D() {
       arrowHelperRef.current = arrow;
     }
 
-    // Pulsing beacon ring on target
     const ringGeo = new THREE.RingGeometry(1.8, 2.3, 32);
     const ringMat = new THREE.MeshBasicMaterial({
       color: activeStep.waitEvent ? 0xf43f5e : 0x38bdf8,
@@ -697,7 +676,7 @@ export default function OracleInstance3D() {
     beaconRingsRef.current.push(ring);
 
     setSelectedComponent(toComp);
-  }, [activeStep, displayMode]);
+  }, [activeStep]);
 
   const handleNextStep = () => {
     sounds.playClick();
@@ -725,13 +704,13 @@ export default function OracleInstance3D() {
 
   return (
     <div className="w-full flex flex-col gap-6">
-      {/* Top Controls: Scenarios & 2D/3D Mode Switcher */}
+      {/* Top Header & Switcher */}
       <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 backdrop-blur-md shadow-2xl flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
             <span className="text-xs font-mono font-semibold text-cyan-400 uppercase tracking-wider">
-              Schématisation Interactive de l&apos;Instance Oracle
+              Architecture &amp; Scénarios de Flux Oracle
             </span>
           </div>
           <h3 className="text-base font-bold text-white mt-0.5">
@@ -740,7 +719,7 @@ export default function OracleInstance3D() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Switcher 3D vs 2D Schematic */}
+          {/* Switcher 3D vs 2D */}
           <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
             <button
               onClick={() => {
@@ -767,8 +746,8 @@ export default function OracleInstance3D() {
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Grid className="w-3.5 h-3.5" />
-              <span>Schéma 2D Détaillé</span>
+              <Workflow className="w-3.5 h-3.5" />
+              <span>Schéma 2D Interactif</span>
             </button>
           </div>
 
@@ -791,11 +770,18 @@ export default function OracleInstance3D() {
         </div>
       </div>
 
-      {displayMode === '3d' ? (
-        /* 3D VIEWPORT WITH LABELS & ARROWS */
-        <div className="relative w-full h-[650px] rounded-2xl overflow-hidden border border-slate-800 bg-slate-950/80 backdrop-blur-md shadow-2xl flex flex-col lg:flex-row">
-          <div className="relative flex-1 h-[400px] lg:h-full cursor-grab active:cursor-grabbing" ref={mountRef}>
-            {/* Top Toolbar: Rotation & Labels Toggle */}
+      {/* Main Container: Both 3D & 2D are preserved in DOM */}
+      <div className="relative w-full rounded-2xl overflow-hidden border border-slate-800 bg-slate-950/90 shadow-2xl flex flex-col lg:flex-row">
+        {/* Left Area: 3D View OR 2D Interactive Schematic */}
+        <div className="relative flex-1 h-[650px]">
+          {/* 3D Canvas Viewport (Always in DOM) */}
+          <div 
+            className={`w-full h-full cursor-grab active:cursor-grabbing ${
+              displayMode === '3d' ? 'block' : 'hidden'
+            }`} 
+            ref={mountRef}
+          >
+            {/* 3D Top Overlay */}
             <div className="absolute top-4 left-4 z-10 flex flex-wrap gap-2">
               <button
                 onClick={() => {
@@ -804,12 +790,12 @@ export default function OracleInstance3D() {
                 }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all shadow-lg ${
                   isRotating
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-500/30'
-                    : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-white'
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                    : 'bg-slate-800 text-slate-400 border border-slate-700'
                 }`}
               >
                 {isRotating ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                {isRotating ? 'Rotation ON' : 'Rotation Pause'}
+                <span>{isRotating ? 'Rotation ON' : 'Rotation Pause'}</span>
               </button>
 
               <button
@@ -826,302 +812,361 @@ export default function OracleInstance3D() {
                 <Eye className="w-3.5 h-3.5" />
                 <span>Titres 3D {showLabels ? 'Affichés' : 'Masqués'}</span>
               </button>
+            </div>
+          </div>
 
-              <button
-                onClick={() => {
-                  setIsAutoPlaying(!isAutoPlaying);
-                  sounds.playClick();
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all shadow-lg ${
-                  isAutoPlaying
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse'
-                    : 'bg-slate-800 text-slate-400 border border-slate-700'
+          {/* 2D Interactive Architecture Schematic (Shown when displayMode === 'schematic') */}
+          <div 
+            className={`w-full h-full p-5 overflow-y-auto flex flex-col justify-between gap-4 bg-[#080d1a] ${
+              displayMode === 'schematic' ? 'flex' : 'hidden'
+            }`}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <span className="text-xs font-mono font-bold text-purple-400 flex items-center gap-2">
+                <Workflow className="w-4 h-4" /> Schéma Interactif 2D : Trajet en Direct
+              </span>
+              <span className="text-[11px] text-cyan-300 font-mono">
+                Étape {activeStep.stepNum} : {DETAILS_MAP[activeStep.from]?.name} ➔ {DETAILS_MAP[activeStep.to]?.name}
+              </span>
+            </div>
+
+            {/* 2D Circuit Grid Layout */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 flex-1 items-stretch">
+              {/* Col 1: Sessions & PGA (3 cols) */}
+              <div 
+                onClick={() => { setSelectedComponent(DETAILS_MAP.session_client); sounds.playClick(); }}
+                className={`md:col-span-3 p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
+                  activeStep.from === 'session_client' || activeStep.to === 'session_client'
+                    ? 'bg-purple-950/60 border-purple-500 shadow-lg shadow-purple-500/25 ring-2 ring-purple-400/50'
+                    : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
                 }`}
               >
-                {isAutoPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 text-emerald-400" />}
-                <span>{isAutoPlaying ? 'Lecture Auto ON' : 'Lecture Auto'}</span>
-              </button>
-            </div>
-
-            {/* Active Step Sign Floating on Screen */}
-            <div className="absolute top-4 right-4 z-10 max-w-xs bg-slate-900/95 backdrop-blur p-3.5 rounded-2xl border border-cyan-500/50 shadow-2xl flex flex-col gap-1.5">
-              <div className="flex items-center justify-between text-xs font-mono">
-                <span className="text-cyan-400 font-bold flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5" /> TRAJET FLÈCHE 3D
-                </span>
-                <span className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 text-[10px] border border-cyan-800 font-bold">
-                  Étape {activeStep.stepNum} / {activeScenario.steps.length}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2 text-xs font-bold text-white pt-1">
-                <span className="text-cyan-300 font-mono text-[11px] truncate max-w-[95px]">
-                  {DETAILS_MAP[activeStep.from]?.name}
-                </span>
-                <ArrowRight className="w-4 h-4 text-amber-400 shrink-0" />
-                <span className="text-pink-300 font-mono text-[11px] truncate max-w-[95px]">
-                  {DETAILS_MAP[activeStep.to]?.name}
-                </span>
-              </div>
-
-              {activeStep.waitEvent && (
-                <div className="mt-1 p-1.5 rounded bg-rose-950/60 border border-rose-800/60 text-[10px] text-rose-300 flex items-center gap-1 font-mono font-bold">
-                  <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
-                  <span>Wait Event: {activeStep.waitEvent}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Step Navigation Bar */}
-            <div className="absolute bottom-4 left-4 right-4 z-10 flex items-center justify-between gap-3 bg-slate-900/95 backdrop-blur-md p-2.5 rounded-2xl border border-slate-800 shadow-2xl">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handlePrevStep}
-                  className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={handleNextStep}
-                  className="p-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold hover:brightness-110 shadow-lg shadow-cyan-500/25 transition flex items-center gap-1"
-                >
-                  <span className="text-xs hidden sm:inline">Étape Suivante</span>
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="flex items-center gap-1.5 overflow-x-auto py-1">
-                {activeScenario.steps.map((st, i) => (
-                  <button
-                    key={st.stepNum}
-                    onClick={() => {
-                      sounds.playClick();
-                      setActiveStepIndex(i);
-                    }}
-                    className={`w-7 h-7 rounded-lg text-xs font-mono font-bold transition flex items-center justify-center shrink-0 ${
-                      i === activeStepIndex
-                        ? 'bg-cyan-500 text-slate-950 shadow-md ring-2 ring-cyan-400/50'
-                        : 'bg-slate-800 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    {st.stepNum}
-                  </button>
-                ))}
-              </div>
-
-              <span className="text-xs text-slate-300 font-semibold truncate hidden md:inline">
-                {activeStep.title}
-              </span>
-            </div>
-          </div>
-
-          {/* Right Column: Detailed Step Explanation Card */}
-          <div className="w-full lg:w-[400px] p-5 bg-slate-900/95 border-t lg:border-t-0 lg:border-l border-slate-800 flex flex-col justify-between overflow-y-auto">
-            <div>
-              <div className="p-4 rounded-xl bg-gradient-to-br from-cyan-950/40 via-slate-900 to-blue-950/40 border border-cyan-800/50 shadow-inner">
-                <div className="flex items-center justify-between pb-2 border-b border-cyan-900/40">
-                  <span className="text-xs font-mono font-bold text-cyan-300 flex items-center gap-1.5">
-                    <Activity className="w-3.5 h-3.5" /> Étape {activeStep.stepNum} : Ce qui se passe
-                  </span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-900/60 text-cyan-200">
-                    Temps Réel
-                  </span>
-                </div>
-
-                <h4 className="text-sm font-bold text-white mt-2 leading-snug">
-                  {activeStep.title}
-                </h4>
-                <p className="text-xs text-cyan-200/90 mt-1.5 leading-relaxed font-sans">
-                  {activeStep.actionText}
-                </p>
-
-                <div className="mt-3 p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] text-slate-300 leading-relaxed font-sans">
-                  <strong className="text-amber-400 block mb-0.5 font-mono">Détail Technique Oracle :</strong>
-                  {activeStep.technicalDetails}
-                </div>
-              </div>
-
-              {/* Inspector of Selected Component */}
-              <div className="mt-5">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                  <span className="text-xs uppercase tracking-wider font-semibold text-slate-400 flex items-center gap-1.5">
-                    <Info className="w-4 h-4 text-purple-400" /> Cible 3D : {selectedComponent.name}
-                  </span>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300">
-                    {selectedComponent.category}
-                  </span>
-                </div>
-
-                <p className="mt-2 text-xs text-slate-300 leading-relaxed">
-                  {selectedComponent.role}
-                </p>
-
-                <div className="mt-3 p-3 rounded-xl bg-slate-950/60 border border-slate-800">
-                  <span className="text-[11px] font-semibold text-pink-400 flex items-center gap-1.5 mb-1">
-                    <Activity className="w-3.5 h-3.5" /> Rôle dans AWR &amp; ASH
-                  </span>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    {selectedComponent.awrAshRole}
+                <div>
+                  <div className="flex items-center gap-2 text-purple-300 font-bold text-xs uppercase tracking-wider mb-2">
+                    <Cpu className="w-4 h-4 text-purple-400" />
+                    <span>Sessions &amp; PGA</span>
+                  </div>
+                  <h4 className="text-sm font-bold text-white">Client / Processus Serveur</h4>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                    Mémoire privée PGA pour les tris, curseurs utilisateurs et connexions clientes.
                   </p>
                 </div>
-
-                <div className="mt-3">
-                  <span className="text-[11px] font-semibold text-slate-400 mb-1.5 flex items-center gap-1">
-                    <Database className="w-3 h-3 text-cyan-400" /> Vues Oracle Associées :
-                  </span>
-                  <div className="flex flex-wrap gap-1">
-                    {selectedComponent.views.map((v) => (
-                      <span
-                        key={v}
-                        className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-cyan-300 border border-slate-700"
-                      >
-                        {v}
-                      </span>
-                    ))}
-                  </div>
-                </div>
+                <span className="text-[10px] font-mono text-purple-400 mt-3 block">
+                  V$SESSION • V$PROCESS
+                </span>
               </div>
-            </div>
 
-            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500">
-              <span>Cliquez sur un bloc 3D pour l&apos;inspecter</span>
-              <span className="font-mono text-cyan-400">Oracle 19c/21c</span>
-            </div>
-          </div>
-        </div>
-      ) : (
-        /* 2D HIGH-DEFINITION SCHEMATIC VIEW (Schéma d'Architecture Coupe SGBD) */
-        <div className="w-full rounded-2xl bg-slate-950 border border-slate-800 p-6 md:p-8 shadow-2xl flex flex-col gap-6">
-          <div className="flex flex-wrap items-center justify-between pb-4 border-b border-slate-800 gap-3">
-            <div>
-              <span className="text-xs font-mono text-purple-400 uppercase tracking-wider font-bold block mb-1">
-                Vue Schéma d&apos;Architecture Officielle
-              </span>
-              <h3 className="text-xl font-bold text-white">
-                Structure de l&apos;Instance Oracle (SGA, Processus d&apos;Arrière-Plan &amp; Disques)
-              </h3>
-            </div>
-            <span className="text-xs font-mono text-slate-400 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
-              Schéma Standard SGBD
-            </span>
-          </div>
-
-          {/* Interactive 2D Architecture Canvas */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Left: User Sessions & PGA (3 cols) */}
-            <div className="lg:col-span-3 flex flex-col gap-4">
-              <div className="p-4 rounded-2xl bg-purple-950/30 border border-purple-800/60 flex flex-col gap-3">
-                <div className="flex items-center gap-2 text-purple-300 font-bold text-sm">
-                  <Cpu className="w-4 h-4 text-purple-400" />
-                  <span>Sessions &amp; PGA</span>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900 border border-purple-900/50 text-xs text-slate-300">
-                  <strong className="text-white block mb-1">PGA (Program Global Area)</strong>
-                  Mémoire privée non partagée allouée à chaque session pour le tri et le hashage.
-                </div>
-                <div className="p-3 rounded-xl bg-slate-900 border border-purple-900/50 text-xs text-slate-300">
-                  <strong className="text-white block mb-1">Processus Serveurs</strong>
-                  Exécutent les requêtes SQL et transmettent les commandes à la SGA.
-                </div>
-              </div>
-            </div>
-
-            {/* Middle: SGA Container (6 cols) */}
-            <div className="lg:col-span-6 flex flex-col gap-4">
-              <div className="p-5 rounded-2xl bg-cyan-950/20 border-2 border-cyan-500/40 flex flex-col gap-4">
-                <div className="flex items-center justify-between border-b border-cyan-800/40 pb-2">
-                  <span className="font-extrabold text-sm text-cyan-300 flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-cyan-400" />
-                    SGA (SYSTEM GLOBAL AREA) — Mémoire Partagée
+              {/* Col 2: SGA Container (6 cols) */}
+              <div className="md:col-span-6 p-4 rounded-xl bg-cyan-950/20 border-2 border-cyan-500/40 flex flex-col justify-between gap-3">
+                <div className="flex items-center justify-between border-b border-cyan-800/40 pb-1.5">
+                  <span className="text-xs font-extrabold text-cyan-300 flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                    SGA (SYSTEM GLOBAL AREA)
                   </span>
-                  <span className="text-[10px] font-mono bg-cyan-900/60 text-cyan-200 px-2 py-0.5 rounded">
+                  <span className="text-[10px] font-mono bg-cyan-950 text-cyan-300 px-2 py-0.5 rounded border border-cyan-800">
                     SGA_TARGET
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-2.5">
                   {/* Buffer Cache */}
-                  <div className="p-3.5 rounded-xl bg-slate-900/90 border border-cyan-500/50 flex flex-col gap-1">
-                    <span className="font-bold text-xs text-cyan-300">Database Buffer Cache</span>
-                    <span className="text-[11px] text-slate-400">Copies en RAM des blocs de 8 Ko lus sur disque.</span>
-                    <span className="text-[10px] font-mono text-cyan-400 mt-1">DB_CACHE_SIZE • V$BH</span>
+                  <div 
+                    onClick={() => { setSelectedComponent(DETAILS_MAP.buffer_cache); sounds.playClick(); }}
+                    className={`p-3 rounded-xl border transition-all cursor-pointer ${
+                      activeStep.from === 'buffer_cache' || activeStep.to === 'buffer_cache'
+                        ? 'bg-cyan-950/80 border-cyan-400 shadow-md ring-2 ring-cyan-400/50'
+                        : 'bg-slate-900 border-slate-800 hover:border-cyan-500/40'
+                    }`}
+                  >
+                    <span className="text-xs font-bold text-cyan-300 block">Buffer Cache</span>
+                    <span className="text-[10px] text-slate-400 leading-tight block mt-0.5">Blocs 8K en mémoire RAM</span>
+                    <span className="text-[9px] font-mono text-cyan-400 mt-1 block">DB_CACHE_SIZE</span>
                   </div>
 
                   {/* Shared Pool */}
-                  <div className="p-3.5 rounded-xl bg-slate-900/90 border border-purple-500/50 flex flex-col gap-1">
-                    <span className="font-bold text-xs text-purple-300">Shared Pool</span>
-                    <span className="text-[11px] text-slate-400">Plans compilés (Library Cache) et dictionnaire.</span>
-                    <span className="text-[10px] font-mono text-purple-400 mt-1">SHARED_POOL_SIZE • V$SQL</span>
+                  <div 
+                    onClick={() => { setSelectedComponent(DETAILS_MAP.shared_pool); sounds.playClick(); }}
+                    className={`p-3 rounded-xl border transition-all cursor-pointer ${
+                      activeStep.from === 'shared_pool' || activeStep.to === 'shared_pool'
+                        ? 'bg-purple-950/80 border-purple-400 shadow-md ring-2 ring-purple-400/50'
+                        : 'bg-slate-900 border-slate-800 hover:border-purple-500/40'
+                    }`}
+                  >
+                    <span className="text-xs font-bold text-purple-300 block">Shared Pool</span>
+                    <span className="text-[10px] text-slate-400 leading-tight block mt-0.5">Plans SQL &amp; Dictionnaire</span>
+                    <span className="text-[9px] font-mono text-purple-400 mt-1 block">V$SQL • Library</span>
                   </div>
 
-                  {/* ASH Circular Buffer */}
-                  <div className="p-3.5 rounded-xl bg-slate-900/90 border border-pink-500/50 flex flex-col gap-1 sm:col-span-2">
+                  {/* Tampon ASH */}
+                  <div 
+                    onClick={() => { setSelectedComponent(DETAILS_MAP.ash_buffer); sounds.playClick(); }}
+                    className={`p-3 rounded-xl border transition-all cursor-pointer col-span-2 ${
+                      activeStep.from === 'ash_buffer' || activeStep.to === 'ash_buffer'
+                        ? 'bg-pink-950/80 border-pink-400 shadow-md ring-2 ring-pink-400/50'
+                        : 'bg-slate-900 border-slate-800 hover:border-pink-500/40'
+                    }`}
+                  >
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-xs text-pink-300">Tampon Circulaire ASH (1s Sampling)</span>
-                      <span className="text-[10px] font-mono bg-pink-950 text-pink-300 px-1.5 py-0.2 rounded">~2 Mo / CPU</span>
+                      <span className="text-xs font-bold text-pink-300">Tampon Circulaire ASH (1 Seconde)</span>
+                      <span className="text-[9px] font-mono bg-pink-950 text-pink-300 px-1.5 py-0.2 rounded">~2 Mo / CPU</span>
                     </div>
-                    <span className="text-[11px] text-slate-400">Échantillonne les sessions actives chaque seconde en RAM sans verrous lourds.</span>
-                    <span className="text-[10px] font-mono text-pink-400 mt-1">V$ACTIVE_SESSION_HISTORY</span>
+                    <span className="text-[10px] text-slate-400 leading-tight block mt-0.5">
+                      Échantillonne chaque seconde 100% des sessions actives en RAM sans verrous lourds.
+                    </span>
+                    <span className="text-[9px] font-mono text-pink-400 mt-1 block">V$ACTIVE_SESSION_HISTORY</span>
                   </div>
 
                   {/* Redo Log Buffer */}
-                  <div className="p-3.5 rounded-xl bg-slate-900/90 border border-amber-500/50 flex flex-col gap-1 sm:col-span-2">
-                    <span className="font-bold text-xs text-amber-300">Redo Log Buffer</span>
-                    <span className="text-[11px] text-slate-400">Enregistre les modifications (vecteurs de redo) avant écriture par LGWR.</span>
-                    <span className="text-[10px] font-mono text-amber-400 mt-1">LOG_BUFFER</span>
+                  <div 
+                    onClick={() => { setSelectedComponent(DETAILS_MAP.redo_buffer); sounds.playClick(); }}
+                    className={`p-3 rounded-xl border transition-all cursor-pointer col-span-2 ${
+                      activeStep.from === 'redo_buffer' || activeStep.to === 'redo_buffer'
+                        ? 'bg-amber-950/80 border-amber-400 shadow-md ring-2 ring-amber-400/50'
+                        : 'bg-slate-900 border-slate-800 hover:border-amber-500/40'
+                    }`}
+                  >
+                    <span className="text-xs font-bold text-amber-300 block">Redo Log Buffer</span>
+                    <span className="text-[10px] text-slate-400 leading-tight block mt-0.5">Vecteurs de modifications avant validation (COMMIT)</span>
+                    <span className="text-[9px] font-mono text-amber-400 mt-1 block">LOG_BUFFER</span>
                   </div>
+                </div>
+              </div>
+
+              {/* Col 3: Background Processes (3 cols) */}
+              <div className="md:col-span-3 flex flex-col justify-between gap-2">
+                {/* MMON */}
+                <div 
+                  onClick={() => { setSelectedComponent(DETAILS_MAP.mmon); sounds.playClick(); }}
+                  className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                    activeStep.from === 'mmon' || activeStep.to === 'mmon'
+                      ? 'bg-emerald-950/80 border-emerald-400 shadow-md ring-2 ring-emerald-400/50'
+                      : 'bg-slate-900 border-slate-800 hover:border-emerald-500/40'
+                  }`}
+                >
+                  <span className="text-xs font-bold text-emerald-300 block">MMON (AWR 60m)</span>
+                  <span className="text-[10px] text-slate-400">Capture les clichés AWR</span>
+                </div>
+
+                {/* MMNL */}
+                <div 
+                  onClick={() => { setSelectedComponent(DETAILS_MAP.mmnl); sounds.playClick(); }}
+                  className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                    activeStep.from === 'mmnl' || activeStep.to === 'mmnl'
+                      ? 'bg-yellow-950/80 border-yellow-400 shadow-md ring-2 ring-yellow-400/50'
+                      : 'bg-slate-900 border-slate-800 hover:border-yellow-500/40'
+                  }`}
+                >
+                  <span className="text-xs font-bold text-yellow-300 block">MMNL (ASH 1/10e)</span>
+                  <span className="text-[10px] text-slate-400">Décharge ASH vers SYSAUX</span>
+                </div>
+
+                {/* LGWR */}
+                <div 
+                  onClick={() => { setSelectedComponent(DETAILS_MAP.lgwr); sounds.playClick(); }}
+                  className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                    activeStep.from === 'lgwr' || activeStep.to === 'lgwr'
+                      ? 'bg-rose-950/80 border-rose-400 shadow-md ring-2 ring-rose-400/50'
+                      : 'bg-slate-900 border-slate-800 hover:border-rose-500/40'
+                  }`}
+                >
+                  <span className="text-xs font-bold text-rose-300 block">LGWR (Log Writer)</span>
+                  <span className="text-[10px] text-slate-400">Écrit lors des COMMITs</span>
                 </div>
               </div>
             </div>
 
-            {/* Right: Background Processes (3 cols) */}
-            <div className="lg:col-span-3 flex flex-col gap-3">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider font-mono">
-                Processus d&apos;Arrière-Plan
+            {/* Bottom Row: Disks (SYSAUX, Datafiles, Redo) */}
+            <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex flex-wrap items-center justify-between gap-3">
+              <span className="text-xs font-bold font-mono text-slate-400 flex items-center gap-1.5 uppercase">
+                <HardDrive className="w-3.5 h-3.5 text-blue-400" /> Stockage Disque Physique :
               </span>
 
-              <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-800/50 text-xs">
-                <span className="font-bold text-emerald-300 block mb-0.5">MMON (AWR Engine)</span>
-                Capture les clichés AWR toutes les 60 min vers SYSAUX.
-              </div>
+              <div className="flex flex-wrap gap-2 text-xs font-mono">
+                {/* SYSAUX */}
+                <button
+                  onClick={() => { setSelectedComponent(DETAILS_MAP.sysaux); sounds.playClick(); }}
+                  className={`px-3 py-1.5 rounded-lg border transition ${
+                    activeStep.from === 'sysaux' || activeStep.to === 'sysaux'
+                      ? 'bg-blue-900 text-white border-blue-400 shadow-md ring-2 ring-blue-400/50'
+                      : 'bg-blue-950/60 text-blue-300 border-blue-800/60 hover:border-blue-400'
+                  }`}
+                >
+                  📁 SYSAUX.DBF (Tables AWR WRH$*)
+                </button>
 
-              <div className="p-3 rounded-xl bg-amber-950/30 border border-amber-800/50 text-xs">
-                <span className="font-bold text-amber-300 block mb-0.5">MMNL (ASH Flusher)</span>
-                Décharge 1 échantillon ASH sur 10 vers SYSAUX.
-              </div>
+                {/* Datafiles */}
+                <button
+                  onClick={() => { setSelectedComponent(DETAILS_MAP.datafiles); sounds.playClick(); }}
+                  className={`px-3 py-1.5 rounded-lg border transition ${
+                    activeStep.from === 'datafiles' || activeStep.to === 'datafiles'
+                      ? 'bg-cyan-900 text-white border-cyan-400 shadow-md ring-2 ring-cyan-400/50'
+                      : 'bg-cyan-950/60 text-cyan-300 border-cyan-800/60 hover:border-cyan-400'
+                  }`}
+                >
+                  💾 DATAFILES (.dbf : Tables &amp; Index)
+                </button>
 
-              <div className="p-3 rounded-xl bg-rose-950/30 border border-rose-800/50 text-xs">
-                <span className="font-bold text-rose-300 block mb-0.5">LGWR (Log Writer)</span>
-                Écrit le Redo Buffer vers les Redo Logs lors des COMMITs.
-              </div>
-
-              <div className="p-3 rounded-xl bg-blue-950/30 border border-blue-800/50 text-xs">
-                <span className="font-bold text-blue-300 block mb-0.5">DBWR (Database Writer)</span>
-                Écrit les blocs modifiés (dirty) vers les Datafiles.
+                {/* Redo Logs */}
+                <button
+                  onClick={() => { setSelectedComponent(DETAILS_MAP.redofiles); sounds.playClick(); }}
+                  className={`px-3 py-1.5 rounded-lg border transition ${
+                    activeStep.from === 'redofiles' || activeStep.to === 'redofiles'
+                      ? 'bg-rose-900 text-white border-rose-400 shadow-md ring-2 ring-rose-400/50'
+                      : 'bg-rose-950/60 text-rose-300 border-rose-800/60 hover:border-rose-400'
+                  }`}
+                >
+                  📝 REDO LOGS (.log : Redo 1, 2, 3)
+                </button>
               </div>
             </div>
           </div>
 
-          {/* Bottom Disk Row */}
-          <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-wrap items-center justify-between gap-4">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono flex items-center gap-1.5">
-              <HardDrive className="w-4 h-4 text-blue-400" /> Stockage Physique sur Disque
-            </span>
-
-            <div className="flex flex-wrap gap-3 text-xs font-mono">
-              <div className="px-3 py-1.5 rounded-lg bg-blue-950/60 border border-blue-800/60 text-blue-300">
-                📁 SYSAUX.DBF (Référentiel AWR DBA_HIST_*)
-              </div>
-              <div className="px-3 py-1.5 rounded-lg bg-cyan-950/60 border border-cyan-800/60 text-cyan-300">
-                💾 DATAFILES (.dbf : Tables &amp; Index)
-              </div>
-              <div className="px-3 py-1.5 rounded-lg bg-rose-950/60 border border-rose-800/60 text-rose-300">
-                📝 REDO LOGS (.log : Redo 1, 2, 3)
-              </div>
+          {/* Floating Trajet Sign (Visible in both 3D and 2D) */}
+          <div className="absolute top-4 right-4 z-10 max-w-xs bg-slate-900/95 backdrop-blur p-3.5 rounded-2xl border border-cyan-500/50 shadow-2xl flex flex-col gap-1.5">
+            <div className="flex items-center justify-between text-xs font-mono">
+              <span className="text-cyan-400 font-bold flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5" /> FLÈCHE DE FLUX
+              </span>
+              <span className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 text-[10px] border border-cyan-800 font-bold">
+                Étape {activeStep.stepNum} / {activeScenario.steps.length}
+              </span>
             </div>
+
+            <div className="flex items-center gap-2 text-xs font-bold text-white pt-1">
+              <span className="text-cyan-300 font-mono text-[11px] truncate max-w-[95px]">
+                {DETAILS_MAP[activeStep.from]?.name}
+              </span>
+              <ArrowRight className="w-4 h-4 text-amber-400 shrink-0" />
+              <span className="text-pink-300 font-mono text-[11px] truncate max-w-[95px]">
+                {DETAILS_MAP[activeStep.to]?.name}
+              </span>
+            </div>
+
+            {activeStep.waitEvent && (
+              <div className="mt-1 p-1.5 rounded bg-rose-950/60 border border-rose-800/60 text-[10px] text-rose-300 flex items-center gap-1 font-mono font-bold">
+                <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                <span>Wait Event: {activeStep.waitEvent}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Step Navigation Bar at bottom */}
+          <div className="absolute bottom-4 left-4 right-4 z-10 flex items-center justify-between gap-3 bg-slate-900/95 backdrop-blur-md p-2.5 rounded-2xl border border-slate-800 shadow-2xl">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handlePrevStep}
+                className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={handleNextStep}
+                className="p-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold hover:brightness-110 shadow-lg shadow-cyan-500/25 transition flex items-center gap-1"
+              >
+                <span className="text-xs hidden sm:inline">Étape Suivante</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-1.5 overflow-x-auto py-1">
+              {activeScenario.steps.map((st, i) => (
+                <button
+                  key={st.stepNum}
+                  onClick={() => {
+                    sounds.playClick();
+                    setActiveStepIndex(i);
+                  }}
+                  className={`w-7 h-7 rounded-lg text-xs font-mono font-bold transition flex items-center justify-center shrink-0 ${
+                    i === activeStepIndex
+                      ? 'bg-cyan-500 text-slate-950 shadow-md ring-2 ring-cyan-400/50'
+                      : 'bg-slate-800 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {st.stepNum}
+                </button>
+              ))}
+            </div>
+
+            <span className="text-xs text-slate-300 font-semibold truncate hidden md:inline">
+              {activeStep.title}
+            </span>
           </div>
         </div>
-      )}
+
+        {/* Right Column: Detailed Step Explanation Card (400px) */}
+        <div className="w-full lg:w-[400px] p-5 bg-slate-900/95 border-t lg:border-t-0 lg:border-l border-slate-800 flex flex-col justify-between overflow-y-auto">
+          <div>
+            <div className="p-4 rounded-xl bg-gradient-to-br from-cyan-950/40 via-slate-900 to-blue-950/40 border border-cyan-800/50 shadow-inner">
+              <div className="flex items-center justify-between pb-2 border-b border-cyan-900/40">
+                <span className="text-xs font-mono font-bold text-cyan-300 flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5" /> Étape {activeStep.stepNum} : Ce qui se passe
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-900/60 text-cyan-200">
+                  Temps Réel
+                </span>
+              </div>
+
+              <h4 className="text-sm font-bold text-white mt-2 leading-snug">
+                {activeStep.title}
+              </h4>
+              <p className="text-xs text-cyan-200/90 mt-1.5 leading-relaxed font-sans">
+                {activeStep.actionText}
+              </p>
+
+              <div className="mt-3 p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] text-slate-300 leading-relaxed font-sans">
+                <strong className="text-amber-400 block mb-0.5 font-mono">Détail Technique Oracle :</strong>
+                {activeStep.technicalDetails}
+              </div>
+            </div>
+
+            {/* Inspector of Selected Component */}
+            <div className="mt-5">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                <span className="text-xs uppercase tracking-wider font-semibold text-slate-400 flex items-center gap-1.5">
+                  <Info className="w-4 h-4 text-purple-400" /> Cible : {selectedComponent.name}
+                </span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300">
+                  {selectedComponent.category}
+                </span>
+              </div>
+
+              <p className="mt-2 text-xs text-slate-300 leading-relaxed">
+                {selectedComponent.role}
+              </p>
+
+              <div className="mt-3 p-3 rounded-xl bg-slate-950/60 border border-slate-800">
+                <span className="text-[11px] font-semibold text-pink-400 flex items-center gap-1.5 mb-1">
+                  <Activity className="w-3.5 h-3.5" /> Rôle dans AWR &amp; ASH
+                </span>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  {selectedComponent.awrAshRole}
+                </p>
+              </div>
+
+              <div className="mt-3">
+                <span className="text-[11px] font-semibold text-slate-400 mb-1.5 flex items-center gap-1">
+                  <Database className="w-3 h-3 text-cyan-400" /> Vues Oracle Associées :
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {selectedComponent.views.map((v) => (
+                    <span
+                      key={v}
+                      className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-cyan-300 border border-slate-700"
+                    >
+                      {v}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500">
+            <span>Cliquez sur un composant pour l&apos;inspecter</span>
+            <span className="font-mono text-cyan-400">Oracle 19c/21c</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
